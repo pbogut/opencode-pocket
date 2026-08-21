@@ -1,0 +1,21 @@
+{
+  "name": "opencode-pocket-plugin",
+  "version": "0.1.0",
+  "description": "Optional OpenCode Pocket TUI state reporter",
+  "type": "module",
+  "exports": {
+    "./tui": "./tui.js"
+  },
+  "files": [
+    "tui.js"
+  ],
+  "scripts": {
+    "test": "node --test tui.test.js",
+    "check": "node --check tui.js"
+  },
+  "engines": {
+    "node": ">=20",
+    "opencode": ">=1.18.20"
+  },
+  "license": "MIT"
+}
