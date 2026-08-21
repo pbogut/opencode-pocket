@@ -326,10 +326,10 @@ function renderConversationShell() {
       </section>
       <form class="composer" data-composer>
         <div class="composer-input">
-          <label class="mode-picker">
-            <span>Mode</span>
-            <select data-agent-select aria-label="OpenCode mode"><option value="">Loading modes…</option></select>
-          </label>
+          <div class="mode-picker">
+            <label><span>Mode</span><select data-agent-select aria-label="OpenCode mode"><option value="">Loading modes…</option></select></label>
+            <button type="button" class="mode-cycle" data-cycle-agent hidden aria-label="Switch to next mode" title="Switch to next mode">↻</button>
+          </div>
           <textarea name="message" rows="1" placeholder="Message OpenCode…" autocomplete="off" aria-keyshortcuts="Enter" title="Enter to send, Shift+Enter for a new line">${esc(draft)}</textarea>
         </div>
         <div class="composer-actions">
@@ -347,7 +347,8 @@ function renderConversationShell() {
 
 function updateAgentSelector() {
   const select = app.querySelector("[data-agent-select]")
-  if (!select) return
+  const cycle = app.querySelector("[data-cycle-agent]")
+  if (!select || !cycle) return
   const agents = state.agentSessionId === state.routeSessionId ? state.agents : []
   const key = JSON.stringify(agents)
   if (state.renderedAgents !== key) {
@@ -359,6 +360,36 @@ function updateAgentSelector() {
   select.disabled = agents.length === 0 || state.switchingAgentSession === state.routeSessionId
   const selected = state.selectedAgents.get(state.routeSessionId)
   if (selected && agents.some((agent) => agent.name === selected)) select.value = selected
+  const currentIndex = agents.findIndex((agent) => agent.name === selected)
+  const next = agents.length ? agents[(currentIndex + 1) % agents.length] : null
+  cycle.hidden = agents.length < 2
+  cycle.disabled = state.switchingAgentSession === state.routeSessionId
+  if (next) {
+    cycle.setAttribute("aria-label", `Switch to ${next.name} mode`)
+    cycle.title = `Switch to ${next.name}`
+  }
+}
+
+async function switchAgent(agent) {
+  const sid = state.routeSessionId
+  if (!agent || state.switchingAgentSession === sid) return
+  const previous = state.selectedAgents.get(sid)
+  state.selectedAgents.set(sid, agent)
+  state.switchingAgentSession = sid
+  updateAgentSelector()
+  try {
+    await api(`/api/sessions/${encodeURIComponent(sid)}/agent`, {
+      method: "POST",
+      body: JSON.stringify({ agent }),
+    })
+  } catch (error) {
+    if (previous) state.selectedAgents.set(sid, previous)
+    else state.selectedAgents.delete(sid)
+    showToast(error.message)
+  } finally {
+    if (state.switchingAgentSession === sid) state.switchingAgentSession = ""
+    if (state.routeSessionId === sid) updateAgentSelector()
+  }
 }
 
 function updateAttention(force = false) {
@@ -501,29 +532,10 @@ app.addEventListener("keydown", (event) => {
   textarea.form.requestSubmit()
 })
 
-app.addEventListener("change", async (event) => {
+app.addEventListener("change", (event) => {
   const select = event.target.closest("[data-agent-select]")
   if (!select || !select.value) return
-  const sid = state.routeSessionId
-  const previous = state.selectedAgents.get(sid)
-  state.selectedAgents.set(sid, select.value)
-  state.switchingAgentSession = sid
-  updateAgentSelector()
-  try {
-    await api(`/api/sessions/${encodeURIComponent(sid)}/agent`, {
-      method: "POST",
-      body: JSON.stringify({ agent: select.value }),
-    })
-  } catch (error) {
-    if (previous) state.selectedAgents.set(sid, previous)
-    else state.selectedAgents.delete(sid)
-    showToast(error.message)
-  } finally {
-    if (state.switchingAgentSession === sid) state.switchingAgentSession = ""
-    if (state.routeSessionId === sid) {
-      updateAgentSelector()
-    }
-  }
+  switchAgent(select.value)
 })
 
 app.addEventListener("click", async (event) => {
@@ -563,6 +575,14 @@ app.addEventListener("click", async (event) => {
     } finally {
       target.disabled = false
     }
+    return
+  }
+  if (target.hasAttribute("data-cycle-agent")) {
+    const agents = state.agentSessionId === state.routeSessionId ? state.agents : []
+    const selected = state.selectedAgents.get(state.routeSessionId)
+    const currentIndex = agents.findIndex((agent) => agent.name === selected)
+    const next = agents.length ? agents[(currentIndex + 1) % agents.length] : null
+    if (next) await switchAgent(next.name)
     return
   }
   if (target.hasAttribute("data-toggle-attention")) {
