@@ -51,6 +51,8 @@ button { color: inherit; }
 .message-parts { display: flex; flex-direction: column; gap: 10px; }
 .message-text { white-space: pre-wrap; word-break: break-word; line-height: 1.48; font-size: 14px; }
 .thought-line, .thought-block > summary { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; color: #d18a68; font-size: 12px; }
+.thought-line.thinking { align-items: center; justify-content: flex-start; }
+.thought-line.thinking::before { width: 6px; height: 6px; border-radius: 50%; background: currentColor; content: ""; animation: tool-pulse 1s ease-in-out infinite alternate; }
 .thought-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .thought-summary strong { font-weight: 700; }
 .thought-block > summary, .tool-block > summary { list-style: none; cursor: pointer; }
@@ -124,5 +126,6 @@ button { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   .activity-ring { animation: none; border-style: dotted; }
   .tool-block.running .tool-status::before, .tool-block.pending .tool-status::before { animation: none; }
+  .thought-line.thinking::before { animation: none; }
   .thought-block > summary::before, .tool-block > summary::before { transition: none; }
 }

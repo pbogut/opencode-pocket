@@ -195,7 +195,8 @@ function detailText(value) {
 
 function renderReasoning(message, part, index) {
   const text = typeof part.text === "string" ? part.text.trim() : ""
-  const firstLine = text.split("\n").find((line) => line.trim())?.trim() || "Thinking"
+  if (!Number.isFinite(part.time?.end)) return `<div class="thought-line thinking">Thinking</div>`
+  const firstLine = text.split("\n").find((line) => line.trim())?.trim() || "Completed"
   const duration = durationLabel(part.time)
   const summary = `<span class="thought-summary"><strong>Thought:</strong> ${esc(firstLine)}</span>${duration ? `<span class="part-duration">${duration}</span>` : ""}`
   if (!text.includes("\n") && text.length <= 120) return `<div class="thought-line">${summary}</div>`
