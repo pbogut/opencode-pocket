@@ -6,19 +6,25 @@ Current features:
 
 - discovers multiple local OpenCode instances through the optional TUI plugin or mDNS
 - keeps sessions and requests isolated by OpenCode instance
-- shows working, retry, idle, and needs-input states
-- streams conversation history, reasoning, tool details, and diffs
+- shows working, retry, idle, blocked, and offline states in an agent dashboard and drawer
+- receives live conversation updates and shows history, reasoning, tool details, and diffs
 - answers structured questions and permission requests
 - sends follow-up prompts and aborts running sessions
-- optionally follows the active session in each OpenCode TUI
+- creates and switches sessions, with optional OpenCode TUI synchronization
+- cycles directly through agents blocked on questions or permissions
+- selects OpenCode modes and accepts browser voice dictation when supported
 - preserves drafts per instance and session
-- installs as a PWA and shows browser notifications while running
-- keeps OpenCode on localhost; only Pocket needs to be exposed to your phone
+- installs as a PWA and shows blocker notifications while the page remains loaded
+- supports keeping OpenCode on localhost so only Pocket needs to be exposed to your phone
 
 ## Requirements
 
 - Node.js 20 or newer
 - OpenCode 1.18.20 or newer for optional TUI synchronization
+- a modern browser with EventSource support; service workers are needed for PWA shell caching
+- HTTPS or another secure context for phone-side PWA installation, notifications, and microphone access
+
+Voice dictation additionally requires the browser Web Speech API. The microphone button is hidden when that API is unavailable.
 
 Install Pocket's dependencies:
 
@@ -68,7 +74,7 @@ opencode serve --hostname 127.0.0.1 --port 4096
 OPENCODE_URL=http://127.0.0.1:4096 npm start
 ```
 
-Set `OPENCODE_DISCOVERY=false` to use only the configured URL. A server started with `opencode serve` has no interactive TUI, so session selection remains independent.
+Set `OPENCODE_DISCOVERY=false` to disable mDNS. Authenticated reports from the optional TUI plugin are independent of this setting; omit the plugin as well if Pocket should use only `OPENCODE_URL`. A server started with `opencode serve` has no interactive TUI, so session selection remains independent.
 
 If OpenCode uses Basic auth, configure the same credentials in Pocket:
 
@@ -95,9 +101,9 @@ Open <http://127.0.0.1:8787>. Pocket listens only on loopback by default.
 
 ## 3. Enable TUI synchronization
 
-This step is optional. Without the plugin, Pocket still discovers instances and controls sessions, but Pocket and each TUI choose sessions independently.
+This step is optional. Without the plugin, Pocket can use mDNS or `OPENCODE_URL` to control sessions, but Pocket and each TUI choose sessions independently.
 
-Pocket creates a private shared token on startup at:
+Unless `OPENCODE_POCKET_TOKEN` is set, Pocket creates a private shared token on startup at:
 
 ```text
 ~/.local/state/opencode-pocket/plugin-token
@@ -121,7 +127,7 @@ Add the TUI plugin to `~/.config/opencode/tui.json`. While working from this che
 }
 ```
 
-If the package is installed from npm, replace the file URL with `"opencode-pocket-plugin"`.
+If the package is installed from npm, replace the file URL with `"opencode-pocket-plugin/tui"`.
 
 The plugin and Pocket use the same default token path. To override it, set `OPENCODE_POCKET_TOKEN_FILE` for both processes or add `"tokenFile"` to the plugin options. You may instead provide the token directly through `OPENCODE_POCKET_TOKEN` to both processes.
 
@@ -131,10 +137,28 @@ When synchronization is active:
 
 - the TUI-selected session is marked `In TUI`
 - opening a Pocket session selects it in that TUI
-- the conversation header opens the 10 newest root sessions and can create a session with OpenCode's defaults
+- the session drawer lists the 10 newest root sessions and creates sessions in the current session's directory when that metadata is available, otherwise using `OPENCODE_DIRECTORY` or OpenCode's default
 - TUI navigation updates Pocket only while Pocket is following that instance
-- opening an instance follows its current TUI session, or its session list when the TUI is home
+- opening an instance follows its current TUI session, or selects its newest root session when the TUI is home
+- returning a followed TUI to its home screen returns Pocket to the Agents dashboard
 - background instances update their markers without taking over Pocket navigation
+
+## Using Pocket
+
+The Agents dashboard shows one card per OpenCode instance. Each card represents that instance's active root session: the session selected in a connected TUI when available, otherwise its newest root session. These cards are distinct from OpenCode's selectable modes in the conversation composer.
+
+From a conversation:
+
+- open the agent drawer with the menu button or a swipe from the left edge
+- use the drawer refresh button to refresh sessions, statuses, questions, and permissions for known instances
+- read green `idle`, yellow `working` or `retry`, red `blocked`, and gray `offline` status indicators
+- tap the right-aligned `N blocked` button to open the next agent needing an answer; repeated taps cycle through blocked agents
+- open the session drawer to switch among the 10 newest root sessions or create a session
+- select an OpenCode mode in the composer; the selection is used for subsequent prompts
+- open the changes view to inspect changed turns and load file diffs on demand
+- tap the microphone button for live dictation when the browser supports the Web Speech API
+
+Dictation appends interim and final speech to the current draft and never sends automatically. Sending a message or changing sessions stops recognition. Android uses non-continuous recognition, and microphone denial or recognition failures appear as a toast.
 
 ## 4. Use Pocket on Android through Tailscale
 
@@ -152,23 +176,32 @@ OpenCode Pocket :8787
 OpenCode instances
 ```
 
-Keep Pocket and OpenCode bound to `127.0.0.1`, then expose Pocket with Tailscale Serve. This avoids exposing OpenCode's powerful API directly to the LAN or internet.
+Keep Pocket and OpenCode bound to `127.0.0.1`, then expose Pocket with Tailscale Serve. This is the recommended architecture and avoids exposing OpenCode's powerful API directly to the LAN or internet. A manually configured `OPENCODE_URL` is not restricted to loopback, so secure any remote OpenCode server separately.
 
 After opening the HTTPS Pocket URL in Chrome on Android, use "Add to Home screen" or "Install app". Tap the bell button once to grant browser notifications.
+
+Notifications are sent only for questions and permission requests, only while Pocket remains loaded but is not visible. Pocket does not currently use Web Push, so it cannot notify after the page or installed PWA has been fully closed. Browser support for page-level notifications varies on mobile.
+
+The service worker caches the application shell for reloads with a network-first strategy. API responses are never cached, and Pocket does not provide offline OpenCode control, background synchronization, or background push delivery.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `OPENCODE_DISCOVERY` | `true` | Enable mDNS discovery as a plugin-independent fallback |
+| `OPENCODE_DISCOVERY` | `true` | Enable mDNS discovery; `0`, `false`, and `off` disable it |
 | `OPENCODE_URL` | empty | Add a fixed OpenCode server alongside discovered instances |
-| `OPENCODE_USERNAME` | `opencode` | OpenCode Basic auth username |
-| `OPENCODE_PASSWORD` | empty | OpenCode Basic auth password |
-| `OPENCODE_DIRECTORY` | empty | Optional directory override for a fixed server |
+| `OPENCODE_USERNAME` | `opencode` | Basic auth username used for all OpenCode instances |
+| `OPENCODE_PASSWORD` | empty | Basic auth password used for all OpenCode instances |
+| `OPENCODE_DIRECTORY` | empty | Global directory default/fallback for OpenCode requests |
 | `OPENCODE_POCKET_TOKEN` | empty | Explicit TUI plugin bearer token |
 | `OPENCODE_POCKET_TOKEN_FILE` | XDG state path | Shared TUI plugin token file |
+| `XDG_STATE_HOME` | `~/.local/state` | Base directory for the default plugin token path |
 | `HOST` | `127.0.0.1` | Pocket listen address |
 | `PORT` | `8787` | Pocket listen port |
+
+The TUI plugin also accepts `OPENCODE_POCKET_URL`, which defaults to `http://127.0.0.1:8787`. Plugin options can override it with `pocketUrl` or its `url` alias, and can override the token path with `tokenFile`.
+
+Basic auth and `OPENCODE_DIRECTORY` are global Pocket settings; per-instance credentials and directory defaults are not currently supported. Session metadata still takes precedence when Pocket knows the session's directory.
 
 Herdr is not required. It can be added later as an optional source of process metadata without replacing direct OpenCode discovery or control.
 
@@ -198,7 +231,19 @@ POST   /api/plugin/tui-state
 DELETE /api/plugin/tui-state
 ```
 
-The browser never receives the OpenCode password or plugin token. The plugin endpoint requires its bearer token.
+Important request and response details:
+
+- `POST /api/refresh` refreshes known instances; it does not restart or force an mDNS scan
+- `POST .../sessions` accepts optional `{ "directory": "..." }`, selects the created session in OpenCode, and returns `201`
+- `GET .../messages?limit=N` defaults to 100 messages and caps the limit at 300
+- `POST .../messages` accepts `{ "text": "...", "agent": "optional-mode" }` and returns `202`
+- `GET .../diff` requires the `messageId` query parameter
+- `POST .../agent` requires `{ "agent": "mode-name" }`
+- question replies require `{ "answers": [...] }`
+- permission replies require `{ "response": "once" }`, `"always"`, or `"reject"`
+- `/api/events` emits state snapshots and normalized OpenCode agent and TUI events over SSE
+
+The browser never receives the OpenCode password or plugin token. The plugin endpoint requires its bearer token, but the browser-facing UI and API have no authentication. Do not bind Pocket to an untrusted network; keep `HOST=127.0.0.1` and expose it through an authenticated private HTTPS layer such as Tailscale Serve.
 
 ## OpenCode compatibility notes
 
@@ -225,6 +270,8 @@ npm test
 npm run check
 npm run dev
 ```
+
+`npm test` runs the backend, discovery, instance lifecycle, token, and bridge tests. `npm run check` performs JavaScript syntax checks; it is not a linter or type checker. Browser interactions, dictation, notifications, and PWA behavior still require manual browser testing.
 
 Plugin package checks:
 
