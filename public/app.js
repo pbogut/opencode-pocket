@@ -605,16 +605,18 @@ function renderAgentSummary(instances) {
   const { counts, blocked } = agentSummary(instances)
   const countItems = [
     ["working", counts.working, "working"],
-    ["blocked", counts.blocked, "blocked"],
     ["idle", counts.idle, "idle"],
     ["offline", counts.offline, "offline"],
   ].filter(([, count]) => count > 0)
-  const summaryLabel = countItems.map(([label, count]) => `${count} ${label}`).join(", ") || "No agents"
+  const summaryItems = counts.blocked ? [...countItems, ["blocked", counts.blocked]] : countItems
+  const summaryLabel = summaryItems.map(([label, count]) => `${count} ${label}`).join(", ") || "No agents"
   const countsHtml = countItems.map(([label, count, className]) => `<span class="agent-count ${className}" title="${esc(`${count} ${label}`)}"><i aria-hidden="true"></i>${count}</span>`).join("")
-  const alerts = blocked.length
-    ? `<div class="agent-alerts">${blocked.map(({ instance, session }) => `<button type="button" class="agent-alert blocked" data-open-session="${esc(session.id)}" data-instance-id="${esc(instance.id)}"><i aria-hidden="true"></i><span>${esc(titleFor(session))}</span><strong>blocked</strong></button>`).join("")}</div>`
+  const currentIndex = blocked.findIndex(({ instance, session }) => routeMatches(instance.id, session.id))
+  const nextBlocked = blocked[currentIndex >= 0 ? (currentIndex + 1) % blocked.length : 0]
+  const alert = nextBlocked
+    ? `<button type="button" class="agent-alert blocked" data-open-session="${esc(nextBlocked.session.id)}" data-instance-id="${esc(nextBlocked.instance.id)}" aria-label="Open next blocked agent: ${esc(titleFor(nextBlocked.session))}" title="Open next blocked agent"><i aria-hidden="true"></i><strong>${counts.blocked} blocked</strong></button>`
     : ""
-  return `<button type="button" class="agent-summary" data-open-agents aria-label="Open agents. ${esc(summaryLabel)}"><span class="agent-summary-label">Agents</span>${countsHtml}</button>${alerts}`
+  return `<button type="button" class="agent-summary" data-open-agents aria-label="Open agents. ${esc(summaryLabel)}"><span class="agent-summary-label">Agents</span>${countsHtml}</button>${alert}`
 }
 
 function renderAgentList(instances) {

@@ -65,10 +65,7 @@ button { color: inherit; }
 .agent-count.idle { color: var(--ok); }
 .agent-count.idle i { border: 1.5px solid currentColor; background: transparent; }
 .agent-count.offline { color: var(--muted); }
-.agent-alerts { min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
-.agent-alerts::-webkit-scrollbar { display: none; }
-.agent-alert { min-width: 0; min-height: 30px; display: flex; align-items: center; gap: 6px; border: 1px solid #6b353b; border-radius: 999px; background: #2b171a; padding: 4px 9px; cursor: pointer; }
-.agent-alert span { max-width: 150px; overflow: hidden; color: var(--text); font-size: 10px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.agent-alert { min-height: 30px; flex: none; display: flex; align-items: center; gap: 6px; margin-left: auto; border: 1px solid #6b353b; border-radius: 999px; background: #2b171a; padding: 4px 9px; cursor: pointer; }
 .agent-alert strong { color: currentColor; font-size: 9px; font-weight: 800; }
 .empty { color: var(--muted); text-align: center; padding: 70px 20px; }
 .conversation { padding-bottom: 152px; }
