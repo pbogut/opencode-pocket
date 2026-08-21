@@ -35,22 +35,13 @@ button { color: inherit; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: #59616d; display: inline-block; }
 .dot.connected { background: var(--ok); }
 .banner { margin: 8px 0 14px; border: 1px solid #5a3a21; background: #2a1e12; border-radius: 12px; padding: 10px 12px; font-size: 13px; color: #ffdca2; }
-.list { display: grid; gap: 10px; padding: 4px 0 90px; }
-.instance-groups { display: grid; gap: 24px; padding: 4px 0 90px; }
-.instance-section .list { padding-bottom: 0; }
-.instance-heading { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 0; background: transparent; padding: 5px 2px 9px; text-align: left; cursor: pointer; }
-.instance-heading span:first-child { min-width: 0; }
-.instance-heading strong, .instance-heading small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.instance-heading strong { font-size: 15px; }
-.instance-heading small { margin-top: 3px; color: var(--muted); font-size: 11px; }
-.instance-current { flex: none; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
-.instance-empty { padding: 24px 12px 10px; text-align: left; }
-.agent-card { width: 100%; text-align: left; border: 1px solid var(--line); background: var(--surface); padding: 14px; border-radius: 16px; cursor: pointer; }
-.agent-row { display: flex; gap: 12px; align-items: start; }
-.agent-main { min-width: 0; flex: 1; }
-.agent-title { font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.agent-subtitle { color: var(--muted); font-size: 12px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.agent-badges { flex: none; display: flex; align-items: center; gap: 6px; }
+.agent-list { display: grid; gap: 8px; padding: 4px 0 90px; }
+.agent-card { width: 100%; min-width: 0; display: flex; align-items: center; gap: 12px; overflow: hidden; border: 1px solid var(--line); background: var(--surface); padding: 13px 14px; border-radius: 14px; text-align: left; cursor: pointer; }
+.agent-card:disabled { cursor: default; }
+.agent-main { min-width: 0; flex: 1; display: block; }
+.agent-title, .agent-subtitle { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-title { font-weight: 700; font-size: 15px; }
+.agent-subtitle { color: var(--muted); font-size: 12px; margin-top: 4px; }
 .badge { border-radius: 999px; border: 1px solid var(--line); padding: 4px 8px; font-size: 11px; color: var(--muted); white-space: nowrap; }
 .badge.tui, .tui-sync-status { border-color: #365c52; background: #14251f; color: var(--ok); }
 .badge.busy { color: #b9c2ff; border-color: #3d477f; background: #181d35; }

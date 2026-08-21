@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { EventEmitter, once } from "node:events"
 import test from "node:test"
-import { InstanceManager, instanceIdForUrl } from "../src/instances.mjs"
+import { activeSessionId, InstanceManager, instanceIdForUrl } from "../src/instances.mjs"
 
 class FakeBridge extends EventEmitter {
   constructor(config) {
@@ -28,6 +28,19 @@ class FakeBridge extends EventEmitter {
   }
 }
 
+test("active session prefers the TUI route and ignores subagent sessions", () => {
+  const sessions = [
+    { id: "ses_old", time: { updated: 10 } },
+    { id: "ses_child", parentID: "ses_old", time: { updated: 30 } },
+    { id: "ses_new", time: { updated: 20 } },
+  ]
+
+  assert.equal(activeSessionId(sessions, { connected: true, route: "session", sessionId: "ses_old" }), "ses_old")
+  assert.equal(activeSessionId(sessions, { connected: true, route: "session", sessionId: "ses_child" }), "ses_new")
+  assert.equal(activeSessionId(sessions, { connected: true, route: "home" }), "ses_new")
+  assert.equal(activeSessionId([{ id: "ses_child", parentId: "ses_parent" }], null), "")
+})
+
 test("manager namespaces duplicate OpenCode identities by instance", async () => {
   const manager = new InstanceManager({
     openCodeUrl: "",
@@ -40,6 +53,7 @@ test("manager namespaces duplicate OpenCode identities by instance", async () =>
   const snapshot = manager.snapshot()
 
   assert.equal(snapshot.instances.length, 2)
+  assert.deepEqual(snapshot.instances.map((item) => item.activeSessionId), ["ses_shared", "ses_shared"])
   assert.deepEqual(new Set(snapshot.sessions.map((item) => item.instanceId)), new Set([first.id, second.id]))
   assert.deepEqual(new Set(snapshot.questions.map((item) => item.instanceId)), new Set([first.id, second.id]))
   assert.deepEqual(new Set(snapshot.permissions.map((item) => item.instanceId)), new Set([first.id, second.id]))

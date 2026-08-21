@@ -9,6 +9,14 @@ export function instanceIdForUrl(url) {
   return createHash("sha256").update(url).digest("hex").slice(0, 12)
 }
 
+export function activeSessionId(sessions, tui) {
+  const topLevel = (Array.isArray(sessions) ? sessions : [])
+    .filter((session) => session?.id && !session.parentID && !session.parentId)
+    .sort((a, b) => (b?.time?.updated || b?.time?.created || 0) - (a?.time?.updated || a?.time?.created || 0))
+  if (tui?.connected && tui.route === "session" && topLevel.some((session) => session.id === tui.sessionId)) return tui.sessionId
+  return topLevel[0]?.id || ""
+}
+
 function pluginServerUrl(value) {
   let target
   try { target = new URL(value) } catch { return "" }
@@ -230,6 +238,7 @@ export class InstanceManager extends EventEmitter {
         path: instance.path,
         project: instance.project,
         tui: instance.tui,
+        activeSessionId: activeSessionId(snapshot.sessions, instance.tui),
         sessionCount: snapshot.sessions.length,
       })
       sessions.push(...snapshot.sessions.map((session) => ({ ...session, instanceId: instance.id })))

@@ -74,8 +74,6 @@ function decodeRoutePart(value) {
 function routeFromHash() {
   const conversation = location.hash.match(/^#\/instance\/([^/]+)\/session\/([^/]+)$/)
   if (conversation) return { instanceId: decodeRoutePart(conversation[1]), sessionId: decodeRoutePart(conversation[2]) }
-  const instance = location.hash.match(/^#\/instance\/([^/]+)$/)
-  if (instance) return { instanceId: decodeRoutePart(instance[1]), sessionId: "" }
   return { instanceId: "", sessionId: "" }
 }
 
@@ -173,7 +171,7 @@ function reconcileTuiRoute() {
     else return false
   }
 
-  if (tui.route !== "session") return navigateTo(instanceId)
+  if (tui.route !== "session") return navigateTo()
   if (!sessionFor(instanceId, tui.sessionId)) return false
   return navigateTo(instanceId, tui.sessionId)
 }
@@ -567,60 +565,37 @@ function instanceTitle(instance) {
   return instance?.serviceName || projectLabel(instance) || instance?.source || instance?.id || "Instance"
 }
 
-function instanceMetadata(instance) {
-  const values = [projectLabel(instance), instance?.source].filter(Boolean)
-  return [...new Set(values)].join(" · ")
-}
-
-function renderSessionList(sessions, instanceId) {
-  if (!sessions.length) return `<div class="empty instance-empty">No sessions found for this instance.</div>`
-  const instance = instanceFor(instanceId)
-  return `<div class="list">${sessions.map((session) => {
-    const status = statusFor(session)
-    const inTui = isSessionInTui(instance, session.id)
-    return `<button class="agent-card" data-open-session="${esc(session.id)}" data-instance-id="${esc(instanceId)}">
-      <div class="agent-row">
-        <div class="agent-main">
-          <div class="agent-title">${esc(titleFor(session))}</div>
-          <div class="agent-subtitle">${esc(session.directory || session.id)} · ${esc(prettyTime(session?.time?.updated || session?.time?.created))}</div>
-        </div>
-        <span class="agent-badges">${inTui ? `<span class="badge tui">In TUI</span>` : ""}<span class="badge ${status.className}">${esc(status.label)}</span></span>
-      </div>
+function renderAgentList(instances) {
+  if (!instances.length) return `<div class="empty">No OpenCode agents found.</div>`
+  return `<div class="agent-list">${instances.map((instance) => {
+    const session = sessionFor(instance.id, instance.activeSessionId)
+    const status = !instance.connected
+      ? { label: "offline", className: "offline" }
+      : session ? statusFor(session) : { label: "idle", className: "idle" }
+    const details = [session?.agent || session?.mode, projectLabel(instance) || instance.serviceName].filter(Boolean)
+    const openable = session && instance.connected
+    return `<button class="agent-card" ${openable ? `data-open-session="${esc(session.id)}" data-instance-id="${esc(instance.id)}"` : "disabled"}>
+      <span class="agent-main">
+        <span class="agent-title">${esc(session ? titleFor(session) : "No active session")}</span>
+        <span class="agent-subtitle">${esc(details.join(" · ") || instanceTitle(instance))}</span>
+      </span>
+      <span class="badge ${status.className}">${esc(status.label)}</span>
     </button>`
   }).join("")}</div>`
 }
 
-function renderList(instanceId = "") {
+function renderList() {
   const instances = state.snapshot.instances || []
-  const sessions = state.snapshot.sessions || []
-  const instance = instanceId ? instanceFor(instanceId) : null
-  if (instanceId && !instance) {
-    return `<div class="shell"><header class="topbar"><button class="icon-button" data-back>←</button><h1>Instance</h1></header><div class="empty">Instance not found.</div></div>`
-  }
-  const content = instance
-    ? `${instance.lastError ? `<div class="banner">${esc(instance.lastError)}</div>` : ""}${renderSessionList(sessions.filter((session) => session.instanceId === instance.id), instance.id)}`
-    : instances.length ? `<div class="instance-groups">${instances.map((item) => {
-      const itemSessions = sessions.filter((session) => session.instanceId === item.id)
-      return `<section class="instance-section">
-        <button class="instance-heading" data-open-instance="${esc(item.id)}">
-          <span><strong>${esc(instanceTitle(item))}</strong><small>${esc(instanceMetadata(item) || item.id)}</small></span>
-          <span class="instance-current"><span class="dot ${item.connected ? "connected" : ""}"></span>${item.connected ? "live" : "offline"} · ${itemSessions.length}</span>
-        </button>
-        ${item.lastError ? `<div class="banner">${esc(item.lastError)}</div>` : ""}
-        ${renderSessionList(itemSessions, item.id)}
-      </section>`
-    }).join("")}</div>` : `<div class="empty">No OpenCode instances found.</div>`
   return `<div class="shell">
     <header class="topbar">
-      ${instance ? `<button class="icon-button" data-back aria-label="Back">←</button>` : ""}
       <div class="topbar-title">
-        <h1>${esc(instance ? instanceTitle(instance) : "OpenCode Pocket")}</h1>
-        <div class="connection"><span class="dot ${(instance ? instance.connected : state.snapshot.connected) ? "connected" : ""}"></span>${instance ? esc(instanceMetadata(instance) || (instance.connected ? "live" : "offline")) : state.snapshot.connected ? "live" : "reconnecting"}</div>
+        <h1>Agents</h1>
+        <div class="connection"><span class="dot ${state.snapshot.connected ? "connected" : ""}"></span>${state.snapshot.connected ? "live" : "reconnecting"}</div>
       </div>
       <button class="icon-button" data-notifications title="Enable notifications">🔔</button>
       <button class="icon-button" data-refresh title="Refresh">↻</button>
     </header>
-    ${content}
+    ${renderAgentList(instances)}
     ${state.toast ? `<div class="toast">${esc(state.toast)}</div>` : ""}
   </div>`
 }
@@ -832,8 +807,8 @@ function updateConversation(session) {
 function render() {
   if (!state.routeSessionId) {
     document.body.classList.remove("changes-open")
-    state.viewKey = `list:${state.routeInstanceId}`
-    app.innerHTML = renderList(state.routeInstanceId)
+    state.viewKey = "list"
+    app.innerHTML = renderList()
     return
   }
 
@@ -1000,22 +975,11 @@ app.addEventListener("click", async (event) => {
     }
     return
   }
-  if (target.dataset.openInstance) {
-    const instanceId = target.dataset.openInstance
-    const instance = instanceFor(instanceId)
-    const tui = connectedTui(instance)
-    state.directFollowInstanceId = ""
-    state.followInstanceId = tui ? instanceId : ""
-    state.pendingTuiSelection = null
-    const sessionId = tui?.route === "session" && sessionFor(instanceId, tui.sessionId) ? tui.sessionId : ""
-    navigateTo(instanceId, sessionId)
-    return
-  }
   if (target.hasAttribute("data-back")) {
     state.followInstanceId = ""
     state.directFollowInstanceId = ""
     state.pendingTuiSelection = null
-    navigateTo(state.routeSessionId ? state.routeInstanceId : "")
+    navigateTo()
     return
   }
   if (target.hasAttribute("data-refresh")) {
