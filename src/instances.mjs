@@ -25,6 +25,12 @@ function pluginServerUrl(value) {
   return target.origin
 }
 
+function invalidPluginReport(field) {
+  const error = new Error(`Invalid plugin state report: ${field}`)
+  error.statusCode = 400
+  return error
+}
+
 function primarySource(sources) {
   return ["configured", "mdns", "plugin", "discovered"].find((source) => sources.has(source)) || "discovered"
 }
@@ -162,13 +168,15 @@ export class InstanceManager extends EventEmitter {
   }
 
   async updateTuiState(report) {
-    if (!report || typeof report !== "object") throw new Error("Invalid plugin state report")
+    if (!report || typeof report !== "object") throw invalidPluginReport("body")
     const serverUrl = pluginServerUrl(report?.serverUrl)
     const route = typeof report.route === "string" ? report.route : "unknown"
     const sessionId = route === "session" && typeof report.sessionId === "string" ? report.sessionId : ""
     const instanceNonce = typeof report.instanceNonce === "string" ? report.instanceNonce : ""
     const sequence = Number(report.sequence)
-    if (!serverUrl || !instanceNonce || !Number.isSafeInteger(sequence) || sequence < 1) throw new Error("Invalid plugin state report")
+    if (!serverUrl) throw invalidPluginReport("serverUrl")
+    if (!instanceNonce) throw invalidPluginReport("instanceNonce")
+    if (!Number.isSafeInteger(sequence) || sequence < 1) throw invalidPluginReport("sequence")
     const instance = await this.add(serverUrl, { source: "plugin" })
     const previous = instance.tui
     if (previous?.instanceNonce === instanceNonce && sequence <= previous.sequence) return instance

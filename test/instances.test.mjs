@@ -137,7 +137,11 @@ test("plugin reports discover loopback instances and own their lifecycle", async
     route: "home",
     instanceNonce: "nonce-remote",
     sequence: 1,
-  }), /Invalid plugin state report/)
+  }), (error) => {
+    assert.equal(error.message, "Invalid plugin state report: serverUrl")
+    assert.equal(error.statusCode, 400)
+    return true
+  })
   assert.equal(manager.snapshot().instances.length, 0)
   manager.stop()
 })

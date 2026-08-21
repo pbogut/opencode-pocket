@@ -46,7 +46,10 @@ export function healthOrigin(result) {
   const value = result?.response?.url || result?.request?.url
   if (!value) return undefined
   try {
-    return new URL(value).origin
+    const target = new URL(value)
+    const host = target.hostname.replace(/^\[|\]$/g, "")
+    if (target.protocol !== "http:" || !target.port || !["127.0.0.1", "localhost", "::1"].includes(host)) return undefined
+    return target.origin
   } catch {
     return undefined
   }
@@ -63,6 +66,7 @@ async function tui(api, options) {
   let retryTimer
   let discoveryTimer
   let activeController
+  let warnedMissingPort = false
   const queue = []
   let current = routeState(api.route.current)
   let currentKey = JSON.stringify(current)
@@ -132,7 +136,17 @@ async function tui(api, options) {
 
   const discover = async () => {
     try {
-      serverUrl = healthOrigin(await api.client.global.health())
+      const health = await api.client.global.health()
+      serverUrl = healthOrigin(health)
+      if (!serverUrl && !warnedMissingPort) {
+        warnedMissingPort = true
+        await api.client.tui?.showToast?.({
+          title: "OpenCode Pocket",
+          message: "Restart OpenCode with --port 0 to enable Pocket discovery.",
+          variant: "warning",
+          duration: 8_000,
+        }).catch(() => {})
+      }
     } catch {
       serverUrl = undefined
     }

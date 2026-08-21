@@ -46,8 +46,41 @@ test("extracts route state and includes session IDs only for sessions", () => {
 
 test("derives the OpenCode origin from health response or request URLs", () => {
   assert.equal(healthOrigin({ response: { url: "http://localhost:4096/global/health" } }), "http://localhost:4096")
-  assert.equal(healthOrigin({ request: { url: "https://code.example/global/health" } }), "https://code.example")
+  assert.equal(healthOrigin({ request: { url: "http://127.0.0.1:4321/global/health" } }), "http://127.0.0.1:4321")
+  assert.equal(healthOrigin({ response: { url: "http://opencode.internal/global/health" } }), undefined)
+  assert.equal(healthOrigin({ request: { url: "https://localhost:4096/global/health" } }), undefined)
+  assert.equal(healthOrigin({ request: { url: "http://192.168.1.10:4096/global/health" } }), undefined)
   assert.equal(healthOrigin({}), undefined)
+})
+
+test("warns once instead of reporting an internal OpenCode origin", async () => {
+  let dispose
+  const warnings = []
+  const requests = []
+  const originalFetch = globalThis.fetch
+  const api = {
+    route: { current: { name: "home" } },
+    client: {
+      global: { health: async () => ({ response: { url: "http://opencode.internal/global/health" } }) },
+      tui: { showToast: async (warning) => warnings.push(warning) },
+    },
+    lifecycle: { onDispose: (callback) => { dispose = callback } },
+  }
+  globalThis.fetch = async (...args) => {
+    requests.push(args)
+    return { ok: true }
+  }
+
+  try {
+    await plugin.tui(api)
+    await waitFor(() => warnings.length === 1)
+    assert.equal(warnings[0].variant, "warning")
+    assert.match(warnings[0].message, /--port 0/)
+    assert.equal(requests.length, 0)
+  } finally {
+    globalThis.fetch = originalFetch
+    await dispose?.()
+  }
 })
 
 test("reports TUI route changes and disconnects on disposal", async () => {
