@@ -726,15 +726,24 @@ function captureComposerSelection() {
   return true
 }
 
-function restoreComposerFocus() {
+function restoreComposerFocus(reveal = false) {
   const selection = state.composerSelection
   state.composerSelection = null
   if (!selection || selection.sessionId !== state.routeSessionId) return
   const textarea = app.querySelector("[data-composer] textarea")
   if (!textarea) return
-  textarea.focus({ preventScroll: true })
+  textarea.focus({ preventScroll: !reveal })
   textarea.setSelectionRange(selection.start, selection.end, selection.direction)
   try { navigator.virtualKeyboard?.show() } catch {}
+  if (!reveal) return
+  state.followMessages = true
+  const revealComposer = () => {
+    if (document.activeElement !== textarea || !textarea.isConnected) return
+    window.scrollTo(0, document.documentElement.scrollHeight)
+    textarea.scrollIntoView({ block: "nearest" })
+  }
+  requestAnimationFrame(revealComposer)
+  setTimeout(revealComposer, 350)
 }
 
 app.addEventListener("pointerdown", (event) => {
@@ -798,7 +807,7 @@ app.addEventListener("change", (event) => {
   const select = event.target.closest("[data-agent-select]")
   if (!select || !select.value) return
   switchAgent(select.value)
-  restoreComposerFocus()
+  restoreComposerFocus(true)
 })
 
 app.addEventListener("click", async (event) => {
