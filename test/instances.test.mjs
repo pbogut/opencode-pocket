@@ -150,3 +150,50 @@ test("plugin disconnect keeps instances discovered from another source", async (
   assert.equal(instance.tui.connected, false)
   manager.stop()
 })
+
+test("manager removes stale mDNS instances after an offline grace period", async () => {
+  const manager = new InstanceManager({
+    openCodeUrl: "",
+    openCodeUsername: "opencode",
+    openCodePassword: "",
+    openCodeDirectory: "",
+  }, { Bridge: FakeBridge })
+  const stale = await manager.add("http://127.0.0.1:4501", { source: "mdns" })
+  stale.bridge.connected = false
+
+  manager.expireOfflineSources(1_000)
+  manager.expireOfflineSources(31_000)
+  assert.equal(manager.snapshot().instances.length, 1)
+
+  manager.expireOfflineSources(31_001)
+  assert.equal(stale.bridge.stopped, true)
+  assert.equal(manager.snapshot().instances.length, 0)
+  manager.stop()
+})
+
+test("manager resets mDNS expiry after reconnect and preserves configured instances", async () => {
+  const manager = new InstanceManager({
+    openCodeUrl: "",
+    openCodeUsername: "opencode",
+    openCodePassword: "",
+    openCodeDirectory: "",
+  }, { Bridge: FakeBridge })
+  const recovered = await manager.add("http://127.0.0.1:4601", { source: "mdns" })
+  recovered.bridge.connected = false
+  manager.expireOfflineSources(1_000)
+  recovered.bridge.connected = true
+  manager.expireOfflineSources(20_000)
+  recovered.bridge.connected = false
+  manager.expireOfflineSources(25_000)
+  manager.expireOfflineSources(50_001)
+  assert.equal(manager.snapshot().instances.length, 1)
+
+  const configured = await manager.add("http://127.0.0.1:4602", { source: "configured" })
+  configured.bridge.connected = false
+  manager.expireOfflineSources(60_000)
+  manager.expireOfflineSources(100_001)
+  assert.equal(recovered.bridge.stopped, true)
+  assert.equal(manager.snapshot().instances.length, 1)
+  assert.equal(manager.get(configured.id), configured)
+  manager.stop()
+})

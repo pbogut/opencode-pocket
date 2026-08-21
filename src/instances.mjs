@@ -3,6 +3,8 @@ import { EventEmitter } from "node:events"
 import { OpenCodeDiscovery } from "./discovery.mjs"
 import { OpenCodeBridge } from "./opencode.mjs"
 
+const MDNS_OFFLINE_TIMEOUT_MS = 30_000
+
 export function instanceIdForUrl(url) {
   return createHash("sha256").update(url).digest("hex").slice(0, 12)
 }
@@ -26,7 +28,7 @@ export class InstanceManager extends EventEmitter {
     this.Bridge = options.Bridge || OpenCodeBridge
     this.discovery = options.discovery || new OpenCodeDiscovery()
     this.instances = new Map()
-    this.tuiTimer = null
+    this.maintenanceTimer = null
     this.discovery.on("up", (endpoint) => {
       this.add(endpoint.url, { source: "mdns", serviceName: endpoint.serviceName }).catch((error) => this.emit("error", error))
     })
@@ -40,8 +42,12 @@ export class InstanceManager extends EventEmitter {
   async start() {
     if (this.config.openCodeUrl) await this.add(this.config.openCodeUrl, { source: "configured" })
     if (this.config.discovery) this.discovery.start()
-    this.tuiTimer = setInterval(() => this.expireTuiStates(), 3_000)
-    this.tuiTimer.unref?.()
+    this.maintenanceTimer = setInterval(() => {
+      const now = Date.now()
+      this.expireTuiStates(now)
+      this.expireOfflineSources(now)
+    }, 3_000)
+    this.maintenanceTimer.unref?.()
   }
 
   async add(url, metadata = {}) {
@@ -52,9 +58,11 @@ export class InstanceManager extends EventEmitter {
     if (existing) {
       const previousSource = existing.source
       const previousServiceName = existing.serviceName
+      const addedSource = !existing.sources.has(source)
       existing.sources.add(source)
       existing.source = primarySource(existing.sources)
       if (metadata.serviceName) existing.serviceName = metadata.serviceName
+      if (source === "mdns" && addedSource) existing.offlineSince = null
       if (existing.source !== previousSource || existing.serviceName !== previousServiceName) this.emitState()
       return existing
     }
@@ -74,6 +82,7 @@ export class InstanceManager extends EventEmitter {
       project: null,
       bridge,
       tui: null,
+      offlineSince: null,
     }
     this.instances.set(id, instance)
     bridge.on("state", () => this.emitState())
@@ -191,6 +200,18 @@ export class InstanceManager extends EventEmitter {
     }
   }
 
+  expireOfflineSources(now = Date.now()) {
+    for (const instance of [...this.instances.values()]) {
+      if (instance.bridge.snapshot().connected) {
+        instance.offlineSince = null
+        continue
+      }
+      if (instance.offlineSince == null) instance.offlineSince = now
+      if (!instance.sources.has("mdns") || now - instance.offlineSince <= MDNS_OFFLINE_TIMEOUT_MS) continue
+      this.removeSource(instance, "mdns")
+    }
+  }
+
   snapshot() {
     const instances = []
     const sessions = []
@@ -231,8 +252,8 @@ export class InstanceManager extends EventEmitter {
   }
 
   stop() {
-    clearInterval(this.tuiTimer)
-    this.tuiTimer = null
+    clearInterval(this.maintenanceTimer)
+    this.maintenanceTimer = null
     this.discovery.stop()
     for (const instance of this.instances.values()) instance.bridge.stop()
     this.instances.clear()
