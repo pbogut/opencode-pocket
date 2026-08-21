@@ -11,6 +11,7 @@ const state = {
   routeSessionId: initialRoute.sessionId,
   messages: [],
   loadingMessages: false,
+  loadingConversations: new Set(),
   agents: [],
   agentSessionId: "",
   switchingAgentSession: "",
@@ -36,6 +37,9 @@ const state = {
   attentionRequest: "",
   attentionCollapsed: false,
   followMessages: true,
+  followInstanceId: "",
+  directFollowInstanceId: initialRoute.sessionId ? initialRoute.instanceId : "",
+  pendingTuiSelection: null,
   expandedParts: new Set(),
 }
 
@@ -91,6 +95,19 @@ function sessionApiPath(instanceId, sessionId, suffix) {
   return `/api/instances/${encodeURIComponent(instanceId)}/sessions/${encodeURIComponent(sessionId)}/${suffix}`
 }
 
+function routeHash(instanceId = "", sessionId = "") {
+  if (!instanceId) return "#/"
+  const instance = `#/instance/${encodeURIComponent(instanceId)}`
+  return sessionId ? `${instance}/session/${encodeURIComponent(sessionId)}` : instance
+}
+
+function navigateTo(instanceId = "", sessionId = "") {
+  const route = routeFromHash()
+  if (route.instanceId === instanceId && route.sessionId === sessionId) return false
+  location.hash = routeHash(instanceId, sessionId)
+  return true
+}
+
 function esc(value = "") {
   return String(value).replace(/[&<>'"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[ch])
 }
@@ -125,6 +142,49 @@ function sessionFor(instanceId, sessionId) {
   return state.snapshot.sessions.find((item) => item.instanceId === instanceId && item.id === sessionId)
 }
 
+function connectedTui(instance) {
+  return instance?.tui?.connected ? instance.tui : null
+}
+
+function isSessionInTui(instance, sessionId) {
+  const tui = connectedTui(instance)
+  return tui?.route === "session" && tui.sessionId === sessionId
+}
+
+function reconcileTuiRoute() {
+  if (state.directFollowInstanceId && state.routeInstanceId === state.directFollowInstanceId && state.routeSessionId) {
+    if (connectedTui(instanceFor(state.directFollowInstanceId))) {
+      state.followInstanceId = state.directFollowInstanceId
+      state.directFollowInstanceId = ""
+    }
+  }
+
+  const instanceId = state.followInstanceId
+  const instance = instanceFor(instanceId)
+  const tui = connectedTui(instance)
+  const pending = state.pendingTuiSelection
+  if (!instanceId || !tui) {
+    if (pending?.instanceId === instanceId) state.pendingTuiSelection = null
+    return false
+  }
+
+  if (pending?.instanceId === instanceId) {
+    if (tui.route === "session" && tui.sessionId === pending.sessionId) state.pendingTuiSelection = null
+    else return false
+  }
+
+  if (tui.route !== "session") return navigateTo(instanceId)
+  if (!sessionFor(instanceId, tui.sessionId)) return false
+  return navigateTo(instanceId, tui.sessionId)
+}
+
+function applySnapshot(snapshot) {
+  state.snapshot = snapshot
+  const navigated = reconcileTuiRoute()
+  if (!navigated) render()
+  return navigated
+}
+
 function pendingQuestion(instanceId, sessionId) {
   return state.snapshot.questions.find((item) => item.instanceId === instanceId && (item.sessionID || item.sessionId) === sessionId)
 }
@@ -154,10 +214,10 @@ function showToast(text) {
 
 async function loadState() {
   try {
-    state.snapshot = await api("/api/state")
-    render()
+    return applySnapshot(await api("/api/state"))
   } catch (error) {
     showToast(error.message)
+    return false
   }
 }
 
@@ -252,8 +312,15 @@ async function loadDiff(messageId) {
 }
 
 async function loadConversation() {
-  await loadMessages()
-  await Promise.all([loadAgents(), loadChanges()])
+  const key = conversationKey()
+  if (!key || state.loadingConversations.has(key)) return
+  state.loadingConversations.add(key)
+  try {
+    await loadMessages()
+    await Promise.all([loadAgents(), loadChanges()])
+  } finally {
+    state.loadingConversations.delete(key)
+  }
 }
 
 function scheduleMessagesRefresh() {
@@ -507,15 +574,17 @@ function instanceMetadata(instance) {
 
 function renderSessionList(sessions, instanceId) {
   if (!sessions.length) return `<div class="empty instance-empty">No sessions found for this instance.</div>`
+  const instance = instanceFor(instanceId)
   return `<div class="list">${sessions.map((session) => {
     const status = statusFor(session)
+    const inTui = isSessionInTui(instance, session.id)
     return `<button class="agent-card" data-open-session="${esc(session.id)}" data-instance-id="${esc(instanceId)}">
       <div class="agent-row">
         <div class="agent-main">
           <div class="agent-title">${esc(titleFor(session))}</div>
           <div class="agent-subtitle">${esc(session.directory || session.id)} · ${esc(prettyTime(session?.time?.updated || session?.time?.created))}</div>
         </div>
-        <span class="badge ${status.className}">${esc(status.label)}</span>
+        <span class="agent-badges">${inTui ? `<span class="badge tui">In TUI</span>` : ""}<span class="badge ${status.className}">${esc(status.label)}</span></span>
       </div>
     </button>`
   }).join("")}</div>`
@@ -727,7 +796,14 @@ function updateConversation(session) {
   const instance = instanceFor(state.routeInstanceId)
   const status = statusFor(session)
   app.querySelector("[data-session-title]").textContent = titleFor(session)
-  app.querySelector("[data-session-meta]").textContent = [instanceTitle(instance), session.directory || session.id].filter(Boolean).join(" · ")
+  const meta = [instanceTitle(instance), session.directory || session.id].filter(Boolean).join(" · ")
+  const tui = connectedTui(instance)
+  const syncLabel = isSessionInTui(instance, session.id)
+    ? "In TUI"
+    : state.pendingTuiSelection?.instanceId === instance?.id && state.pendingTuiSelection.sessionId === session.id
+      ? "Syncing TUI"
+      : tui ? "TUI connected" : ""
+  app.querySelector("[data-session-meta]").innerHTML = `<span class="meta-detail">${esc(meta)}</span>${syncLabel ? `<span class="tui-sync-status">${syncLabel}</span>` : ""}`
   const badge = app.querySelector("[data-session-status]")
   badge.textContent = status.label
   badge.className = `badge ${status.className}`
@@ -904,19 +980,46 @@ app.addEventListener("click", async (event) => {
   if (!target) return
 
   if (target.dataset.openSession) {
-    location.hash = `#/instance/${encodeURIComponent(target.dataset.instanceId)}/session/${encodeURIComponent(target.dataset.openSession)}`
+    const instanceId = target.dataset.instanceId
+    const sessionId = target.dataset.openSession
+    const instance = instanceFor(instanceId)
+    const tui = connectedTui(instance)
+    state.directFollowInstanceId = ""
+    state.followInstanceId = tui ? instanceId : ""
+    const selection = tui && !isSessionInTui(instance, sessionId) ? { instanceId, sessionId } : null
+    state.pendingTuiSelection = selection
+    navigateTo(instanceId, sessionId)
+    if (tui) {
+      try {
+        await api(sessionApiPath(instanceId, sessionId, "select"), { method: "POST" })
+      } catch (error) {
+        if (state.pendingTuiSelection === selection) state.pendingTuiSelection = null
+        reconcileTuiRoute()
+        showToast(error.message)
+      }
+    }
     return
   }
   if (target.dataset.openInstance) {
-    location.hash = `#/instance/${encodeURIComponent(target.dataset.openInstance)}`
+    const instanceId = target.dataset.openInstance
+    const instance = instanceFor(instanceId)
+    const tui = connectedTui(instance)
+    state.directFollowInstanceId = ""
+    state.followInstanceId = tui ? instanceId : ""
+    state.pendingTuiSelection = null
+    const sessionId = tui?.route === "session" && sessionFor(instanceId, tui.sessionId) ? tui.sessionId : ""
+    navigateTo(instanceId, sessionId)
     return
   }
   if (target.hasAttribute("data-back")) {
-    location.hash = state.routeSessionId ? `#/instance/${encodeURIComponent(state.routeInstanceId)}` : "#/"
+    state.followInstanceId = ""
+    state.directFollowInstanceId = ""
+    state.pendingTuiSelection = null
+    navigateTo(state.routeSessionId ? state.routeInstanceId : "")
     return
   }
   if (target.hasAttribute("data-refresh")) {
-    try { state.snapshot = await api("/api/refresh", { method: "POST" }); render() } catch (error) { showToast(error.message) }
+    try { applySnapshot(await api("/api/refresh", { method: "POST" })) } catch (error) { showToast(error.message) }
     return
   }
   if (target.hasAttribute("data-notifications")) {
@@ -1056,6 +1159,11 @@ window.addEventListener("hashchange", () => {
   const route = routeFromHash()
   state.routeInstanceId = route.instanceId
   state.routeSessionId = route.sessionId
+  if (!route.instanceId) {
+    state.followInstanceId = ""
+    state.directFollowInstanceId = ""
+    state.pendingTuiSelection = null
+  }
   state.messages = []
   state.loadingMessages = false
   state.agents = []
@@ -1094,8 +1202,7 @@ source.addEventListener("dev-server", (event) => {
 })
 source.addEventListener("dev-reload", () => location.reload())
 source.addEventListener("state", (event) => {
-  state.snapshot = JSON.parse(event.data)
-  render()
+  applySnapshot(JSON.parse(event.data))
 })
 source.addEventListener("agent-event", (message) => {
   const event = JSON.parse(message.data)
@@ -1114,5 +1221,7 @@ source.addEventListener("agent-event", (message) => {
 })
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {})
-loadState().then(() => { if (state.routeSessionId) loadConversation() })
+loadState().then((navigated) => {
+  if (!navigated && state.routeSessionId && sessionFor(state.routeInstanceId, state.routeSessionId)) loadConversation()
+})
 render()

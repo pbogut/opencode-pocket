@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto"
 import http from "node:http"
 import { createReadStream, watch } from "node:fs"
 import { stat } from "node:fs/promises"
@@ -5,8 +6,10 @@ import { extname, join, normalize } from "node:path"
 import { fileURLToPath } from "node:url"
 import { loadConfig } from "./config.mjs"
 import { InstanceManager } from "./instances.mjs"
+import { loadPluginToken } from "./plugin-token.mjs"
 
 const config = loadConfig()
+const pluginToken = await loadPluginToken(config)
 const manager = new InstanceManager(config)
 const publicDir = fileURLToPath(new URL("../public/", import.meta.url))
 const sseClients = new Set()
@@ -42,6 +45,14 @@ function broadcast(type, payload) {
   for (const client of sseClients) client.write(frame)
 }
 
+function authorizedPlugin(req) {
+  const value = req.headers.authorization || ""
+  const token = value.startsWith("Bearer ") ? value.slice(7) : ""
+  const expected = Buffer.from(pluginToken)
+  const actual = Buffer.from(token)
+  return actual.length === expected.length && timingSafeEqual(actual, expected)
+}
+
 if (devMode) {
   publicWatcher = watch(publicDir, { recursive: true }, () => {
     clearTimeout(reloadTimer)
@@ -52,6 +63,7 @@ if (devMode) {
 
 manager.on("state", (state) => broadcast("state", state))
 manager.on("event", (event) => broadcast("agent-event", event))
+manager.on("tui", (event) => broadcast("tui-state", event))
 manager.on("error", (error) => console.error("OpenCode discovery failed", error))
 
 function mime(path) {
@@ -100,6 +112,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && path === "/api/refresh") {
       await manager.refresh()
       return json(res, 200, manager.snapshot())
+    }
+    if ((req.method === "POST" || req.method === "DELETE") && path === "/api/plugin/tui-state") {
+      if (!authorizedPlugin(req)) return json(res, 401, { error: "Unauthorized" })
+      const input = await bodyJson(req)
+      if (req.method === "DELETE") manager.removeTuiState(input)
+      else manager.updateTuiState(input)
+      return json(res, 200, { ok: true })
     }
     if (req.method === "GET" && path === "/api/events") {
       res.writeHead(200, {
@@ -210,6 +229,7 @@ server.listen(config.port, config.host, () => {
   console.log(`OpenCode Pocket: http://${config.host}:${config.port}`)
   if (config.openCodeUrl) console.log(`OpenCode server: ${config.openCodeUrl}`)
   if (config.discovery) console.log("OpenCode discovery: mDNS enabled")
+  console.log(`OpenCode plugin token: ${config.pluginToken ? "environment" : config.pluginTokenFile}`)
   if (devMode) console.log("Live reload: enabled")
   if (!config.openCodePassword) console.log("OpenCode auth: none configured in Pocket")
 })

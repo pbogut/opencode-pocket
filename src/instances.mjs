@@ -14,6 +14,7 @@ export class InstanceManager extends EventEmitter {
     this.Bridge = options.Bridge || OpenCodeBridge
     this.discovery = options.discovery || new OpenCodeDiscovery()
     this.instances = new Map()
+    this.tuiTimer = null
     this.discovery.on("up", (endpoint) => {
       this.add(endpoint.url, { source: "mdns", serviceName: endpoint.serviceName }).catch((error) => this.emit("error", error))
     })
@@ -27,6 +28,8 @@ export class InstanceManager extends EventEmitter {
   async start() {
     if (this.config.openCodeUrl) await this.add(this.config.openCodeUrl, { source: "configured" })
     if (this.config.discovery) this.discovery.start()
+    this.tuiTimer = setInterval(() => this.expireTuiStates(), 3_000)
+    this.tuiTimer.unref?.()
   }
 
   async add(url, metadata = {}) {
@@ -94,6 +97,63 @@ export class InstanceManager extends EventEmitter {
     })))
   }
 
+  instanceForPluginUrl(value) {
+    let target
+    try { target = new URL(value) } catch { return null }
+    const host = target.hostname.replace(/^\[|\]$/g, "")
+    if (!["127.0.0.1", "localhost", "::1"].includes(host) || target.protocol !== "http:" || !target.port) return null
+    return [...this.instances.values()].find((instance) => {
+      const url = new URL(instance.url)
+      return url.protocol === target.protocol && url.port === target.port
+    }) || null
+  }
+
+  updateTuiState(report) {
+    const instance = this.instanceForPluginUrl(report.serverUrl)
+    if (!instance) throw new Error("Plugin OpenCode instance is not discovered")
+    const route = typeof report.route === "string" ? report.route : "unknown"
+    const sessionId = route === "session" && typeof report.sessionId === "string" ? report.sessionId : ""
+    const instanceNonce = typeof report.instanceNonce === "string" ? report.instanceNonce : ""
+    const sequence = Number(report.sequence)
+    if (!instanceNonce || !Number.isSafeInteger(sequence) || sequence < 1) throw new Error("Invalid plugin state report")
+    const previous = instance.tui
+    if (previous?.instanceNonce === instanceNonce && sequence <= previous.sequence) return instance
+    const changed = !previous?.connected || previous.instanceNonce !== instanceNonce || previous.route !== route || previous.sessionId !== sessionId
+    instance.tui = {
+      connected: true,
+      route,
+      sessionId,
+      instanceNonce,
+      sequence,
+      pluginVersion: typeof report.pluginVersion === "string" ? report.pluginVersion : "",
+      lastSeenAt: Date.now(),
+    }
+    if (sessionId && !instance.bridge.snapshot().sessions.some((session) => session.id === sessionId)) instance.bridge.refresh().catch(() => {})
+    if (changed) {
+      this.emit("tui", { instanceId: instance.id, tui: instance.tui })
+      this.emitState()
+    }
+    return instance
+  }
+
+  removeTuiState(report) {
+    const instance = this.instanceForPluginUrl(report.serverUrl)
+    if (!instance?.tui || instance.tui.instanceNonce !== report.instanceNonce) return false
+    instance.tui = { ...instance.tui, connected: false, lastSeenAt: Date.now() }
+    this.emit("tui", { instanceId: instance.id, tui: instance.tui })
+    this.emitState()
+    return true
+  }
+
+  expireTuiStates(now = Date.now()) {
+    for (const instance of this.instances.values()) {
+      if (!instance.tui?.connected || now - instance.tui.lastSeenAt <= 12_000) continue
+      instance.tui = { ...instance.tui, connected: false }
+      this.emit("tui", { instanceId: instance.id, tui: instance.tui })
+      this.emitState()
+    }
+  }
+
   snapshot() {
     const instances = []
     const sessions = []
@@ -134,6 +194,8 @@ export class InstanceManager extends EventEmitter {
   }
 
   stop() {
+    clearInterval(this.tuiTimer)
+    this.tuiTimer = null
     this.discovery.stop()
     for (const instance of this.instances.values()) instance.bridge.stop()
     this.instances.clear()

@@ -55,3 +55,35 @@ test("manager namespaces duplicate OpenCode identities by instance", async () =>
   assert.equal(manager.snapshot().instances.length, 1)
   manager.stop()
 })
+
+test("manager tracks current TUI routes and rejects stale reports", async () => {
+  const manager = new InstanceManager({
+    openCodeUrl: "",
+    openCodeUsername: "opencode",
+    openCodePassword: "",
+    openCodeDirectory: "",
+  }, { Bridge: FakeBridge })
+  const instance = await manager.add("http://127.0.0.1:4201")
+  manager.updateTuiState({
+    serverUrl: "http://localhost:4201",
+    route: "session",
+    sessionId: "ses_new",
+    instanceNonce: "nonce-1",
+    sequence: 2,
+    pluginVersion: "test",
+  })
+  assert.equal(instance.tui.sessionId, "ses_new")
+  assert.equal(instance.tui.connected, true)
+
+  manager.updateTuiState({
+    serverUrl: "http://127.0.0.1:4201",
+    route: "home",
+    instanceNonce: "nonce-1",
+    sequence: 1,
+  })
+  assert.equal(instance.tui.sessionId, "ses_new")
+
+  manager.expireTuiStates(instance.tui.lastSeenAt + 12_001)
+  assert.equal(instance.tui.connected, false)
+  manager.stop()
+})

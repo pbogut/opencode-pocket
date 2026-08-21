@@ -49,7 +49,9 @@ button { color: inherit; }
 .agent-main { min-width: 0; flex: 1; }
 .agent-title { font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agent-subtitle { color: var(--muted); font-size: 12px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agent-badges { flex: none; display: flex; align-items: center; gap: 6px; }
 .badge { border-radius: 999px; border: 1px solid var(--line); padding: 4px 8px; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.badge.tui, .tui-sync-status { border-color: #365c52; background: #14251f; color: var(--ok); }
 .badge.busy { color: #b9c2ff; border-color: #3d477f; background: #181d35; }
 .badge.retry { color: var(--warn); border-color: #6c5828; background: #2a2415; }
 .badge.attention { color: #ffdca2; border-color: #6c5828; background: #2a2415; }
@@ -182,7 +184,9 @@ body.changes-open { overflow: hidden; }
 .stop-square { width: 9px; height: 9px; border-radius: 2px; background: currentColor; }
 .stop-button.retry .activity-ring { animation-duration: 1.5s; }
 @keyframes activity-spin { to { transform: rotate(360deg); } }
-.meta { color: var(--muted); font-size: 12px; margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; margin-bottom: 6px; white-space: nowrap; }
+.meta-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tui-sync-status { flex: none; border-width: 1px; border-style: solid; border-radius: 999px; padding: 2px 6px; font-size: 10px; }
 .toast { position: fixed; left: 50%; bottom: 95px; transform: translateX(-50%); background: #242933; border: 1px solid var(--line); border-radius: 12px; padding: 10px 13px; font-size: 13px; z-index: 30; max-width: min(90vw, 560px); }
 @media (prefers-reduced-motion: reduce) {
   .activity-ring { animation: none; border-style: dotted; }
