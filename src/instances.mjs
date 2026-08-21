@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import { EventEmitter } from "node:events"
+import { OpenCodeDiscovery } from "./discovery.mjs"
 import { OpenCodeBridge } from "./opencode.mjs"
 
 export function instanceIdForUrl(url) {
@@ -11,11 +12,21 @@ export class InstanceManager extends EventEmitter {
     super()
     this.config = config
     this.Bridge = options.Bridge || OpenCodeBridge
+    this.discovery = options.discovery || new OpenCodeDiscovery()
     this.instances = new Map()
+    this.discovery.on("up", (endpoint) => {
+      this.add(endpoint.url, { source: "mdns", serviceName: endpoint.serviceName }).catch((error) => this.emit("error", error))
+    })
+    this.discovery.on("down", (endpoint) => {
+      const id = instanceIdForUrl(endpoint.url)
+      if (this.instances.get(id)?.source === "mdns") this.remove(id)
+    })
+    this.discovery.on("error", (error) => this.emit("error", error))
   }
 
   async start() {
     if (this.config.openCodeUrl) await this.add(this.config.openCodeUrl, { source: "configured" })
+    if (this.config.discovery) this.discovery.start()
   }
 
   async add(url, metadata = {}) {
@@ -123,6 +134,7 @@ export class InstanceManager extends EventEmitter {
   }
 
   stop() {
+    this.discovery.stop()
     for (const instance of this.instances.values()) instance.bridge.stop()
     this.instances.clear()
   }

@@ -52,6 +52,7 @@ if (devMode) {
 
 manager.on("state", (state) => broadcast("state", state))
 manager.on("event", (event) => broadcast("agent-event", event))
+manager.on("error", (error) => console.error("OpenCode discovery failed", error))
 
 function mime(path) {
   return {
@@ -208,6 +209,7 @@ await manager.start()
 server.listen(config.port, config.host, () => {
   console.log(`OpenCode Pocket: http://${config.host}:${config.port}`)
   if (config.openCodeUrl) console.log(`OpenCode server: ${config.openCodeUrl}`)
+  if (config.discovery) console.log("OpenCode discovery: mDNS enabled")
   if (devMode) console.log("Live reload: enabled")
   if (!config.openCodePassword) console.log("OpenCode auth: none configured in Pocket")
 })
