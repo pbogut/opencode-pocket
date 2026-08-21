@@ -28,6 +28,14 @@ test("message part can derive session from part", () => {
   assert.equal(event.sessionId, "ses_3")
 })
 
+test("session lifecycle events expose complete session metadata", () => {
+  const info = { id: "ses_4", title: "Updated title" }
+  const event = normalizeEvent({ type: "session.updated", properties: { sessionID: "ses_4", info } })
+  assert.equal(event.type, "session.updated")
+  assert.equal(event.sessionId, "ses_4")
+  assert.equal(event.session, info)
+})
+
 test("id helpers accept common spellings", () => {
   assert.equal(requestId({ id: "x" }), "x")
   assert.equal(requestId({ requestID: "y" }), "y")

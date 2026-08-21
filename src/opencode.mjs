@@ -52,6 +52,10 @@ export function normalizeEvent(event) {
   if (type === "session.error") {
     return { type, sessionId: sid, error: data.error || data, raw: event }
   }
+  if (type === "session.created" || type === "session.updated" || type === "session.deleted") {
+    const session = data.info && typeof data.info === "object" ? data.info : null
+    return { type, sessionId: sid || session?.id || "", session, raw: event }
+  }
   if (type === "message.part.updated" || type === "message.part.delta") {
     return {
       type: "message.part",
@@ -231,12 +235,22 @@ export class OpenCodeBridge extends EventEmitter {
   handleEvent(raw) {
     this.lastEventAt = Date.now()
     const event = normalizeEvent(raw)
-    if (event.sessionId && !this.sessions.has(event.sessionId)) {
+    const sessionLifecycle = event.type === "session.created" || event.type === "session.updated" || event.type === "session.deleted"
+    if (event.sessionId && !this.sessions.has(event.sessionId) && !sessionLifecycle) {
       // Session metadata is authoritative and cheap enough to refresh when a previously unseen session appears.
       this.refresh().catch(() => {})
     }
 
-    if (event.type === "question.asked" && event.requestId) {
+    if ((event.type === "session.created" || event.type === "session.updated") && event.session?.id) {
+      this.sessions.set(event.session.id, event.session)
+    } else if (event.type === "session.created" || event.type === "session.updated") {
+      this.refresh().catch(() => {})
+    } else if (event.type === "session.deleted" && event.sessionId) {
+      this.sessions.delete(event.sessionId)
+      this.statuses.delete(event.sessionId)
+      for (const [id, item] of this.questions) if (sessionId(item) === event.sessionId) this.questions.delete(id)
+      for (const [id, item] of this.permissions) if (sessionId(item) === event.sessionId) this.permissions.delete(id)
+    } else if (event.type === "question.asked" && event.requestId) {
       this.questions.set(event.requestId, event.request)
     } else if ((event.type === "question.replied" || event.type === "question.rejected") && event.requestId) {
       this.questions.delete(event.requestId)

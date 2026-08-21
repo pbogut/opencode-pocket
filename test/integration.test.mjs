@@ -101,6 +101,18 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
   await waitFor(() => bridge.connected)
 
   assert.equal(bridge.snapshot().sessions[0].status.type, "busy")
+  emitSse(sseClients, {
+    type: "session.updated",
+    properties: { sessionID: session.id, info: { ...session, title: "OpenCode Pocket development" } },
+  })
+  await waitFor(() => bridge.sessions.get(session.id)?.title === "OpenCode Pocket development")
+
+  const temporary = { ...session, id: "ses_temporary", title: "Temporary", parentID: session.id }
+  emitSse(sseClients, { type: "session.created", properties: { sessionID: temporary.id, info: temporary } })
+  await waitFor(() => bridge.sessions.has(temporary.id))
+  emitSse(sseClients, { type: "session.deleted", properties: { sessionID: temporary.id, info: temporary } })
+  await waitFor(() => !bridge.sessions.has(temporary.id))
+
   const messages = await bridge.listMessages("ses_1")
   assert.equal(messages[1].parts[0].text, "Working")
   assert.deepEqual(await bridge.listChangeTurns("ses_1"), [{
