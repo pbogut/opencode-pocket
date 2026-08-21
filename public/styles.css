@@ -47,7 +47,6 @@ button { color: inherit; }
 .messages { display: flex; flex-direction: column; gap: 12px; padding: 8px 0 18px; }
 .message { border: 1px solid var(--line); background: var(--surface); border-radius: 16px; padding: 12px 13px; }
 .message.user { margin-left: 18%; background: #1d2230; }
-.message.assistant { margin-right: 4%; }
 .message-role { color: var(--muted); font-size: 11px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .06em; }
 .message-text { white-space: pre-wrap; word-break: break-word; line-height: 1.48; font-size: 14px; }
 .tool-line { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; color: var(--muted); font-size: 12px; }
@@ -96,4 +95,3 @@ button { color: inherit; }
 .meta { color: var(--muted); font-size: 12px; margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .toast { position: fixed; left: 50%; bottom: 95px; transform: translateX(-50%); background: #242933; border: 1px solid var(--line); border-radius: 12px; padding: 10px 13px; font-size: 13px; z-index: 30; max-width: min(90vw, 560px); }
 @media (prefers-reduced-motion: reduce) { .activity-ring { animation: none; border-style: dotted; } }
-@media (min-width: 700px) { .shell { padding-left: 22px; padding-right: 22px; } }
