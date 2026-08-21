@@ -76,7 +76,12 @@ button { color: inherit; }
 .attention-sheet .attention-card { margin: 0; border: 0; border-radius: 0; background: transparent; }
 .attention-sheet .attention-card + .attention-card { border-top: 1px solid #6c5828; }
 .composer { max-width: 732px; margin: 0 auto; display: flex; gap: 8px; align-items: end; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); padding: 8px; }
-.composer textarea { min-width: 0; flex: 1; resize: none; max-height: 150px; min-height: 42px; border: 0; outline: none; background: transparent; color: var(--text); padding: 10px; }
+.composer-input { min-width: 0; flex: 1; }
+.mode-picker { display: flex; align-items: center; gap: 6px; width: max-content; margin: 0 8px; color: var(--muted); font-size: 11px; }
+.mode-picker select { max-width: 150px; border: 0; outline: none; background: transparent; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; }
+.mode-picker select:disabled { color: var(--muted); cursor: default; }
+.mode-picker option { background: var(--surface); color: var(--text); }
+.composer textarea { width: 100%; resize: none; max-height: 150px; min-height: 42px; border: 0; outline: none; background: transparent; color: var(--text); padding: 10px; }
 .composer button { border-radius: 12px; border: 0; background: var(--text); color: #111318; padding: 11px 15px; font-weight: 700; }
 .composer-actions { display: flex; gap: 8px; align-items: center; }
 .composer .stop-button { position: relative; display: grid; width: 42px; height: 42px; padding: 0; place-items: center; overflow: hidden; border: 1px solid #694046; background: #28191c; color: var(--danger); }

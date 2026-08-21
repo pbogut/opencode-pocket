@@ -107,6 +107,8 @@ POST /api/refresh
 
 GET  /api/sessions/:id/messages
 POST /api/sessions/:id/messages
+GET  /api/sessions/:id/agents
+POST /api/sessions/:id/agent
 POST /api/sessions/:id/abort
 
 POST /api/questions/:id/reply

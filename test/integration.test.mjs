@@ -38,10 +38,21 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
     if (url.pathname === "/session/status") return sendJson(res, { ses_1: { type: "busy" } })
     if (url.pathname === "/question" && req.method === "GET") return sendJson(res, question ? [question] : [])
     if (url.pathname === "/permission" && req.method === "GET") return sendJson(res, permission ? [permission] : [])
+    if (url.pathname === "/agent" && req.method === "GET") {
+      return sendJson(res, [
+        { name: "build", description: "Build mode", mode: "primary", permission: [], options: {} },
+        { name: "review", description: "Review changes", mode: "all", permission: [], options: {} },
+        { name: "explore", mode: "subagent", permission: [], options: {} },
+        { name: "summary", mode: "primary", hidden: true, permission: [], options: {} },
+      ])
+    }
     if (url.pathname === "/session/ses_1/message" && req.method === "GET") {
       return sendJson(res, [{ info: { role: "assistant" }, parts: [{ type: "text", text: "Working" }] }])
     }
     if (url.pathname === "/session/ses_1/prompt_async" && req.method === "POST") {
+      res.writeHead(204); return res.end()
+    }
+    if (url.pathname === "/api/session/ses_1/agent" && req.method === "POST") {
       res.writeHead(204); return res.end()
     }
     if (url.pathname === "/question/que_1/reply" && req.method === "POST") {
@@ -80,6 +91,14 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
   assert.equal(bridge.snapshot().sessions[0].status.type, "busy")
   const messages = await bridge.listMessages("ses_1")
   assert.equal(messages[0].parts[0].text, "Working")
+  assert.deepEqual(await bridge.listAgents("ses_1"), [
+    { name: "build", description: "Build mode", mode: "primary", color: "" },
+    { name: "review", description: "Review changes", mode: "all", color: "" },
+  ])
+  await bridge.switchAgent("ses_1", "review")
+  const agentCall = calls.find((call) => call.path === "/api/session/ses_1/agent")
+  assert.deepEqual(agentCall.body, { agent: "review" })
+  assert.equal(new URLSearchParams(agentCall.search).get("directory"), projectDir)
 
   question = {
     id: "que_1",
@@ -103,9 +122,9 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
   assert.equal(permissionCall.body.response, "once")
   assert.equal(new URLSearchParams(permissionCall.search).get("directory"), projectDir)
 
-  await bridge.sendMessage("ses_1", "Continue")
+  await bridge.sendMessage("ses_1", "Continue", "review")
   const promptCall = calls.find((call) => call.path === "/session/ses_1/prompt_async")
-  assert.deepEqual(promptCall.body, { parts: [{ type: "text", text: "Continue" }] })
+  assert.deepEqual(promptCall.body, { parts: [{ type: "text", text: "Continue" }], agent: "review" })
   assert.equal(new URLSearchParams(promptCall.search).get("directory"), projectDir)
 })
 

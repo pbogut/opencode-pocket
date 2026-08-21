@@ -9,6 +9,10 @@ const state = {
   routeSessionId: sessionFromHash(),
   messages: [],
   loadingMessages: false,
+  agents: [],
+  agentSessionId: "",
+  switchingAgentSession: "",
+  selectedAgents: new Map(),
   messageDrafts: new Map(draftEntries(savedDrafts.messages).filter(([, value]) => typeof value === "string")),
   questionAnswers: new Map(draftEntries(savedDrafts.questions).filter(([, value]) => Array.isArray(value))),
   toast: "",
@@ -16,6 +20,7 @@ const state = {
   viewKey: "",
   renderedMessages: "",
   renderedAttention: "",
+  renderedAgents: "",
   attentionRequest: "",
   attentionCollapsed: false,
   followMessages: true,
@@ -128,6 +133,40 @@ async function loadMessages({ quiet = false } = {}) {
     state.loadingMessages = false
     render()
   }
+}
+
+function agentFromMessages() {
+  for (let index = state.messages.length - 1; index >= 0; index -= 1) {
+    const info = state.messages[index]?.info || state.messages[index]
+    const agent = info?.agent || info?.mode
+    if (agent) return agent
+  }
+  return ""
+}
+
+async function loadAgents() {
+  const sid = state.routeSessionId
+  if (!sid) return
+  try {
+    const agents = await api(`/api/sessions/${encodeURIComponent(sid)}/agents`)
+    if (state.routeSessionId !== sid) return
+    state.agents = Array.isArray(agents) ? agents : []
+    state.agentSessionId = sid
+    const available = new Set(state.agents.map((agent) => agent.name))
+    const remembered = state.selectedAgents.get(sid)
+    const inferred = agentFromMessages()
+    const selected = available.has(remembered) ? remembered : available.has(inferred) ? inferred : state.agents[0]?.name
+    if (selected) state.selectedAgents.set(sid, selected)
+    state.renderedAgents = ""
+    render()
+  } catch (error) {
+    if (state.routeSessionId === sid) showToast(error.message)
+  }
+}
+
+async function loadConversation() {
+  await loadMessages()
+  await loadAgents()
 }
 
 function scheduleMessagesRefresh() {
@@ -286,7 +325,13 @@ function renderConversationShell() {
         <div class="attention-sheet-body" data-attention></div>
       </section>
       <form class="composer" data-composer>
-        <textarea name="message" rows="1" placeholder="Message OpenCode…" autocomplete="off">${esc(draft)}</textarea>
+        <div class="composer-input">
+          <label class="mode-picker">
+            <span>Mode</span>
+            <select data-agent-select aria-label="OpenCode mode"><option value="">Loading modes…</option></select>
+          </label>
+          <textarea name="message" rows="1" placeholder="Message OpenCode…" autocomplete="off">${esc(draft)}</textarea>
+        </div>
         <div class="composer-actions">
           <button type="button" class="stop-button" data-stop hidden aria-label="Stop current request" title="Stop current request">
             <span class="activity-ring" aria-hidden="true"></span>
@@ -298,6 +343,22 @@ function renderConversationShell() {
     </div>
     <div data-toast></div>
   </div>`
+}
+
+function updateAgentSelector() {
+  const select = app.querySelector("[data-agent-select]")
+  if (!select) return
+  const agents = state.agentSessionId === state.routeSessionId ? state.agents : []
+  const key = JSON.stringify(agents)
+  if (state.renderedAgents !== key) {
+    select.innerHTML = agents.length
+      ? agents.map((agent) => `<option value="${esc(agent.name)}" title="${esc(agent.description)}">${esc(agent.name)}</option>`).join("")
+      : `<option value="">Loading modes…</option>`
+    state.renderedAgents = key
+  }
+  select.disabled = agents.length === 0 || state.switchingAgentSession === state.routeSessionId
+  const selected = state.selectedAgents.get(state.routeSessionId)
+  if (selected && agents.some((agent) => agent.name === selected)) select.value = selected
 }
 
 function updateAttention(force = false) {
@@ -348,6 +409,7 @@ function updateConversation(session) {
   stop.classList.toggle("retry", activity === "retry")
   stop.setAttribute("aria-label", activity === "retry" ? "Agent is retrying. Stop current request" : "Agent is working. Stop current request")
   stop.title = activity === "retry" ? "Agent is retrying. Stop current request" : "Agent is working. Stop current request"
+  updateAgentSelector()
 
   updateAttention()
 
@@ -384,6 +446,7 @@ function render() {
     state.viewKey = key
     state.renderedMessages = ""
     state.renderedAttention = ""
+    state.renderedAgents = ""
     state.attentionRequest = ""
     state.attentionCollapsed = false
     state.followMessages = true
@@ -428,6 +491,31 @@ app.addEventListener("input", (event) => {
     answers[index] = input.value ? [...selected, input.value] : selected
     state.questionAnswers.set(rid, answers)
     persistDrafts()
+  }
+})
+
+app.addEventListener("change", async (event) => {
+  const select = event.target.closest("[data-agent-select]")
+  if (!select || !select.value) return
+  const sid = state.routeSessionId
+  const previous = state.selectedAgents.get(sid)
+  state.selectedAgents.set(sid, select.value)
+  state.switchingAgentSession = sid
+  updateAgentSelector()
+  try {
+    await api(`/api/sessions/${encodeURIComponent(sid)}/agent`, {
+      method: "POST",
+      body: JSON.stringify({ agent: select.value }),
+    })
+  } catch (error) {
+    if (previous) state.selectedAgents.set(sid, previous)
+    else state.selectedAgents.delete(sid)
+    showToast(error.message)
+  } finally {
+    if (state.switchingAgentSession === sid) state.switchingAgentSession = ""
+    if (state.routeSessionId === sid) {
+      updateAgentSelector()
+    }
   }
 })
 
@@ -542,8 +630,9 @@ app.addEventListener("submit", async (event) => {
   const text = textarea.value.trim()
   if (!text) return
   const sid = state.routeSessionId
+  const agent = state.selectedAgents.get(sid) || ""
   try {
-    await api(`/api/sessions/${encodeURIComponent(sid)}/messages`, { method: "POST", body: JSON.stringify({ text }) })
+    await api(`/api/sessions/${encodeURIComponent(sid)}/messages`, { method: "POST", body: JSON.stringify({ text, agent }) })
     state.messageDrafts.delete(sid)
     persistDrafts()
     textarea.value = ""
@@ -556,8 +645,10 @@ app.addEventListener("submit", async (event) => {
 window.addEventListener("hashchange", () => {
   state.routeSessionId = sessionFromHash()
   state.messages = []
+  state.agents = []
+  state.agentSessionId = ""
   render()
-  if (state.routeSessionId) loadMessages()
+  if (state.routeSessionId) loadConversation()
 })
 
 window.addEventListener("scroll", () => {
@@ -584,10 +675,15 @@ source.addEventListener("agent-event", (message) => {
     state.questionAnswers.delete(event.requestId)
     persistDrafts()
   }
+  const switchedAgent = event.type === "session.next.agent.switched" ? event.data?.agent : event.message?.info?.agent
+  if (event.sessionId && switchedAgent) {
+    state.selectedAgents.set(event.sessionId, switchedAgent)
+    if (event.sessionId === state.routeSessionId) render()
+  }
   maybeNotify(event)
   if (state.routeSessionId && event.sessionId === state.routeSessionId && ["message.part", "message.updated", "session.status"].includes(event.type)) scheduleMessagesRefresh()
 })
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {})
-loadState().then(() => { if (state.routeSessionId) loadMessages() })
+loadState().then(() => { if (state.routeSessionId) loadConversation() })
 render()

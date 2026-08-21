@@ -306,11 +306,31 @@ export class OpenCodeBridge extends EventEmitter {
     return Array.isArray(data) ? data : []
   }
 
-  async sendMessage(sid, text) {
-    const body = { parts: [{ type: "text", text }] }
+  async listAgents(sid) {
+    const data = await this.request(this.pathForSession("/agent", sid))
+    return (Array.isArray(data) ? data : [])
+      .filter((agent) => agent && !agent.hidden && (agent.mode === "primary" || agent.mode === "all"))
+      .map((agent) => ({
+        name: agent.name,
+        description: agent.description || "",
+        mode: agent.mode,
+        color: agent.color || "",
+      }))
+      .filter((agent) => agent.name)
+  }
+
+  async sendMessage(sid, text, agent = "") {
+    const body = { parts: [{ type: "text", text }], ...(agent ? { agent } : {}) }
     return this.request(this.pathForSession(`/session/${encodeURIComponent(sid)}/prompt_async`, sid), {
       method: "POST",
       body: JSON.stringify(body),
+    })
+  }
+
+  async switchAgent(sid, agent) {
+    return this.request(this.pathForSession(`/api/session/${encodeURIComponent(sid)}/agent`, sid), {
+      method: "POST",
+      body: JSON.stringify({ agent }),
     })
   }
 

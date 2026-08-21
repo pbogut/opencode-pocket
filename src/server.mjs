@@ -115,8 +115,23 @@ const server = http.createServer(async (req, res) => {
       const input = await bodyJson(req)
       const text = String(input.text || "").trim()
       if (!text) return json(res, 400, { error: "Message text is required" })
-      await bridge.sendMessage(sid, text)
+      const agent = String(input.agent || "").trim()
+      await bridge.sendMessage(sid, text, agent)
       return json(res, 202, { ok: true })
+    }
+
+    match = path.match(/^\/api\/sessions\/([^/]+)\/agents$/)
+    if (match && req.method === "GET") {
+      return json(res, 200, await bridge.listAgents(decodeURIComponent(match[1])))
+    }
+
+    match = path.match(/^\/api\/sessions\/([^/]+)\/agent$/)
+    if (match && req.method === "POST") {
+      const input = await bodyJson(req)
+      const agent = String(input.agent || "").trim()
+      if (!agent) return json(res, 400, { error: "Agent is required" })
+      await bridge.switchAgent(decodeURIComponent(match[1]), agent)
+      return json(res, 200, { ok: true })
     }
 
     match = path.match(/^\/api\/sessions\/([^/]+)\/abort$/)
