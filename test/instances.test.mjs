@@ -64,7 +64,7 @@ test("manager tracks current TUI routes and rejects stale reports", async () => 
     openCodeDirectory: "",
   }, { Bridge: FakeBridge })
   const instance = await manager.add("http://127.0.0.1:4201")
-  manager.updateTuiState({
+  await manager.updateTuiState({
     serverUrl: "http://localhost:4201",
     route: "session",
     sessionId: "ses_new",
@@ -75,7 +75,7 @@ test("manager tracks current TUI routes and rejects stale reports", async () => 
   assert.equal(instance.tui.sessionId, "ses_new")
   assert.equal(instance.tui.connected, true)
 
-  manager.updateTuiState({
+  await manager.updateTuiState({
     serverUrl: "http://127.0.0.1:4201",
     route: "home",
     instanceNonce: "nonce-1",
@@ -84,6 +84,69 @@ test("manager tracks current TUI routes and rejects stale reports", async () => 
   assert.equal(instance.tui.sessionId, "ses_new")
 
   manager.expireTuiStates(instance.tui.lastSeenAt + 12_001)
+  assert.equal(instance.tui.connected, false)
+  manager.stop()
+})
+
+test("plugin reports discover loopback instances and own their lifecycle", async () => {
+  const manager = new InstanceManager({
+    openCodeUrl: "",
+    openCodeUsername: "opencode",
+    openCodePassword: "",
+    openCodeDirectory: "",
+  }, { Bridge: FakeBridge })
+  const instance = await manager.updateTuiState({
+    serverUrl: "http://127.0.0.1:4301",
+    route: "home",
+    instanceNonce: "nonce-plugin",
+    sequence: 1,
+  })
+
+  assert.equal(instance.source, "plugin")
+  assert.equal(manager.snapshot().instances.length, 1)
+  assert.equal(manager.removeTuiState({ serverUrl: "http://localhost:4301", instanceNonce: "nonce-plugin" }), true)
+  assert.equal(instance.bridge.stopped, true)
+  assert.equal(manager.snapshot().instances.length, 0)
+
+  const expired = await manager.updateTuiState({
+    serverUrl: "http://127.0.0.1:4302",
+    route: "home",
+    instanceNonce: "nonce-expired",
+    sequence: 1,
+  })
+  manager.expireTuiStates(expired.tui.lastSeenAt + 12_001)
+  assert.equal(expired.bridge.stopped, true)
+  assert.equal(manager.snapshot().instances.length, 0)
+
+  await assert.rejects(manager.updateTuiState({
+    serverUrl: "http://192.168.1.10:4303",
+    route: "home",
+    instanceNonce: "nonce-remote",
+    sequence: 1,
+  }), /Invalid plugin state report/)
+  assert.equal(manager.snapshot().instances.length, 0)
+  manager.stop()
+})
+
+test("plugin disconnect keeps instances discovered from another source", async () => {
+  const manager = new InstanceManager({
+    openCodeUrl: "",
+    openCodeUsername: "opencode",
+    openCodePassword: "",
+    openCodeDirectory: "",
+  }, { Bridge: FakeBridge })
+  const instance = await manager.add("http://127.0.0.1:4401", { source: "mdns" })
+  const reported = await manager.updateTuiState({
+    serverUrl: "http://localhost:4401",
+    route: "home",
+    instanceNonce: "nonce-shared",
+    sequence: 1,
+  })
+
+  assert.equal(reported, instance)
+  manager.removeTuiState({ serverUrl: "http://localhost:4401", instanceNonce: "nonce-shared" })
+  assert.equal(manager.snapshot().instances.length, 1)
+  assert.equal(instance.source, "mdns")
   assert.equal(instance.tui.connected, false)
   manager.stop()
 })

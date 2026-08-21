@@ -7,6 +7,18 @@ export function instanceIdForUrl(url) {
   return createHash("sha256").update(url).digest("hex").slice(0, 12)
 }
 
+function pluginServerUrl(value) {
+  let target
+  try { target = new URL(value) } catch { return "" }
+  const host = target.hostname.replace(/^\[|\]$/g, "")
+  if (!["127.0.0.1", "localhost", "::1"].includes(host) || target.protocol !== "http:" || !target.port) return ""
+  return target.origin
+}
+
+function primarySource(sources) {
+  return ["configured", "mdns", "plugin", "discovered"].find((source) => sources.has(source)) || "discovered"
+}
+
 export class InstanceManager extends EventEmitter {
   constructor(config, options = {}) {
     super()
@@ -19,8 +31,8 @@ export class InstanceManager extends EventEmitter {
       this.add(endpoint.url, { source: "mdns", serviceName: endpoint.serviceName }).catch((error) => this.emit("error", error))
     })
     this.discovery.on("down", (endpoint) => {
-      const id = instanceIdForUrl(endpoint.url)
-      if (this.instances.get(id)?.source === "mdns") this.remove(id)
+      const instance = this.instanceForUrl(endpoint.url)
+      if (instance) this.removeSource(instance, "mdns")
     })
     this.discovery.on("error", (error) => this.emit("error", error))
   }
@@ -35,8 +47,17 @@ export class InstanceManager extends EventEmitter {
   async add(url, metadata = {}) {
     const normalizedUrl = url.replace(/\/$/, "")
     const id = metadata.id || instanceIdForUrl(normalizedUrl)
-    const existing = this.instances.get(id)
-    if (existing) return existing
+    const source = metadata.source || "discovered"
+    const existing = this.instances.get(id) || this.instanceForUrl(normalizedUrl)
+    if (existing) {
+      const previousSource = existing.source
+      const previousServiceName = existing.serviceName
+      existing.sources.add(source)
+      existing.source = primarySource(existing.sources)
+      if (metadata.serviceName) existing.serviceName = metadata.serviceName
+      if (existing.source !== previousSource || existing.serviceName !== previousServiceName) this.emitState()
+      return existing
+    }
 
     const bridge = new this.Bridge({
       ...this.config,
@@ -46,7 +67,8 @@ export class InstanceManager extends EventEmitter {
     const instance = {
       id,
       url: normalizedUrl,
-      source: metadata.source || "discovered",
+      source,
+      sources: new Set([source]),
       serviceName: metadata.serviceName || "",
       path: null,
       project: null,
@@ -75,6 +97,15 @@ export class InstanceManager extends EventEmitter {
     return true
   }
 
+  removeSource(instance, source) {
+    if (!instance.sources.delete(source)) return false
+    if (instance.sources.size === 0) return this.remove(instance.id)
+    if (source === "mdns") instance.serviceName = ""
+    instance.source = primarySource(instance.sources)
+    this.emitState()
+    return true
+  }
+
   get(id) {
     return this.instances.get(id)
   }
@@ -97,25 +128,31 @@ export class InstanceManager extends EventEmitter {
     })))
   }
 
-  instanceForPluginUrl(value) {
-    let target
-    try { target = new URL(value) } catch { return null }
-    const host = target.hostname.replace(/^\[|\]$/g, "")
-    if (!["127.0.0.1", "localhost", "::1"].includes(host) || target.protocol !== "http:" || !target.port) return null
+  instanceForUrl(value) {
+    if (typeof value !== "string") return null
+    const normalizedUrl = value.replace(/\/$/, "")
+    const localUrl = pluginServerUrl(normalizedUrl)
     return [...this.instances.values()].find((instance) => {
-      const url = new URL(instance.url)
-      return url.protocol === target.protocol && url.port === target.port
+      if (instance.url === normalizedUrl) return true
+      const instanceLocalUrl = pluginServerUrl(instance.url)
+      return localUrl && instanceLocalUrl && new URL(localUrl).port === new URL(instanceLocalUrl).port
     }) || null
   }
 
-  updateTuiState(report) {
-    const instance = this.instanceForPluginUrl(report.serverUrl)
-    if (!instance) throw new Error("Plugin OpenCode instance is not discovered")
+  instanceForPluginUrl(value) {
+    const serverUrl = pluginServerUrl(value)
+    return serverUrl ? this.instanceForUrl(serverUrl) : null
+  }
+
+  async updateTuiState(report) {
+    if (!report || typeof report !== "object") throw new Error("Invalid plugin state report")
+    const serverUrl = pluginServerUrl(report?.serverUrl)
     const route = typeof report.route === "string" ? report.route : "unknown"
     const sessionId = route === "session" && typeof report.sessionId === "string" ? report.sessionId : ""
     const instanceNonce = typeof report.instanceNonce === "string" ? report.instanceNonce : ""
     const sequence = Number(report.sequence)
-    if (!instanceNonce || !Number.isSafeInteger(sequence) || sequence < 1) throw new Error("Invalid plugin state report")
+    if (!serverUrl || !instanceNonce || !Number.isSafeInteger(sequence) || sequence < 1) throw new Error("Invalid plugin state report")
+    const instance = await this.add(serverUrl, { source: "plugin" })
     const previous = instance.tui
     if (previous?.instanceNonce === instanceNonce && sequence <= previous.sequence) return instance
     const changed = !previous?.connected || previous.instanceNonce !== instanceNonce || previous.route !== route || previous.sessionId !== sessionId
@@ -137,20 +174,20 @@ export class InstanceManager extends EventEmitter {
   }
 
   removeTuiState(report) {
-    const instance = this.instanceForPluginUrl(report.serverUrl)
+    const instance = this.instanceForPluginUrl(report?.serverUrl)
     if (!instance?.tui || instance.tui.instanceNonce !== report.instanceNonce) return false
     instance.tui = { ...instance.tui, connected: false, lastSeenAt: Date.now() }
     this.emit("tui", { instanceId: instance.id, tui: instance.tui })
-    this.emitState()
+    if (!this.removeSource(instance, "plugin")) this.emitState()
     return true
   }
 
   expireTuiStates(now = Date.now()) {
-    for (const instance of this.instances.values()) {
+    for (const instance of [...this.instances.values()]) {
       if (!instance.tui?.connected || now - instance.tui.lastSeenAt <= 12_000) continue
       instance.tui = { ...instance.tui, connected: false }
       this.emit("tui", { instanceId: instance.id, tui: instance.tui })
-      this.emitState()
+      if (!this.removeSource(instance, "plugin")) this.emitState()
     }
   }
 

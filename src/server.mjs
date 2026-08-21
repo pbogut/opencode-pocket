@@ -117,7 +117,7 @@ const server = http.createServer(async (req, res) => {
       if (!authorizedPlugin(req)) return json(res, 401, { error: "Unauthorized" })
       const input = await bodyJson(req)
       if (req.method === "DELETE") manager.removeTuiState(input)
-      else manager.updateTuiState(input)
+      else await manager.updateTuiState(input)
       return json(res, 200, { ok: true })
     }
     if (req.method === "GET" && path === "/api/events") {
