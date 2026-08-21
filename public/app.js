@@ -12,6 +12,7 @@ const state = {
   agents: [],
   agentSessionId: "",
   switchingAgentSession: "",
+  composerSelection: null,
   selectedAgents: new Map(),
   changes: [],
   changesSessionId: "",
@@ -713,6 +714,36 @@ function selectedAnswersFromCard(card) {
   return answers
 }
 
+function captureComposerSelection() {
+  const textarea = app.querySelector("[data-composer] textarea")
+  if (!textarea || document.activeElement !== textarea) return false
+  state.composerSelection = {
+    sessionId: state.routeSessionId,
+    start: textarea.selectionStart,
+    end: textarea.selectionEnd,
+    direction: textarea.selectionDirection,
+  }
+  return true
+}
+
+function restoreComposerFocus() {
+  const selection = state.composerSelection
+  state.composerSelection = null
+  if (!selection || selection.sessionId !== state.routeSessionId) return
+  const textarea = app.querySelector("[data-composer] textarea")
+  if (!textarea) return
+  textarea.focus({ preventScroll: true })
+  textarea.setSelectionRange(selection.start, selection.end, selection.direction)
+  try { navigator.virtualKeyboard?.show() } catch {}
+}
+
+app.addEventListener("pointerdown", (event) => {
+  const control = event.target.closest("[data-agent-select], [data-cycle-agent]")
+  if (!control) return
+  const hadComposerFocus = captureComposerSelection()
+  if (hadComposerFocus && control.hasAttribute("data-cycle-agent")) event.preventDefault()
+})
+
 app.addEventListener("input", (event) => {
   const input = event.target
   if (input.matches("[data-composer] textarea")) {
@@ -767,6 +798,7 @@ app.addEventListener("change", (event) => {
   const select = event.target.closest("[data-agent-select]")
   if (!select || !select.value) return
   switchAgent(select.value)
+  restoreComposerFocus()
 })
 
 app.addEventListener("click", async (event) => {
@@ -822,7 +854,8 @@ app.addEventListener("click", async (event) => {
     const selected = state.selectedAgents.get(state.routeSessionId)
     const currentIndex = agents.findIndex((agent) => agent.name === selected)
     const next = agents.length ? agents[(currentIndex + 1) % agents.length] : null
-    if (next) await switchAgent(next.name)
+    if (next) switchAgent(next.name)
+    restoreComposerFocus()
     return
   }
   if (target.hasAttribute("data-toggle-attention")) {
