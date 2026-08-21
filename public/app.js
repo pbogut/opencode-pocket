@@ -24,6 +24,7 @@ const state = {
   attentionRequest: "",
   attentionCollapsed: false,
   followMessages: true,
+  expandedParts: new Set(),
 }
 
 function draftEntries(value) {
@@ -174,21 +175,68 @@ function scheduleMessagesRefresh() {
   state.refreshTimer = setTimeout(() => loadMessages({ quiet: true }), 180)
 }
 
-function messageText(message) {
-  const parts = Array.isArray(message?.parts) ? message.parts : []
-  const text = parts
-    .filter((part) => part?.type === "text" && typeof part.text === "string")
-    .map((part) => part.text)
-    .join("\n")
-  return text
+function durationLabel(time) {
+  if (!Number.isFinite(time?.start) || !Number.isFinite(time?.end)) return ""
+  const milliseconds = Math.max(0, time.end - time.start)
+  if (milliseconds < 1000) return `${Math.round(milliseconds)}ms`
+  if (milliseconds < 10_000) return `${(milliseconds / 1000).toFixed(1)}s`
+  if (milliseconds < 60_000) return `${Math.round(milliseconds / 1000)}s`
+  return `${Math.floor(milliseconds / 60_000)}m ${Math.round((milliseconds % 60_000) / 1000)}s`
 }
 
-function toolSummary(message) {
+function partKey(message, part, index) {
+  return part.id || part.callID || `${message?.info?.id || message?.id || "message"}:${index}`
+}
+
+function detailText(value) {
+  if (typeof value === "string") return value
+  try { return JSON.stringify(value, null, 2) } catch { return String(value ?? "") }
+}
+
+function renderReasoning(message, part, index) {
+  const text = typeof part.text === "string" ? part.text.trim() : ""
+  const firstLine = text.split("\n").find((line) => line.trim())?.trim() || "Thinking"
+  const duration = durationLabel(part.time)
+  const summary = `<span class="thought-summary"><strong>Thought:</strong> ${esc(firstLine)}</span>${duration ? `<span class="part-duration">${duration}</span>` : ""}`
+  if (!text.includes("\n") && text.length <= 120) return `<div class="thought-line">${summary}</div>`
+  const key = partKey(message, part, index)
+  return `<details class="thought-block" data-part-key="${esc(key)}" ${state.expandedParts.has(key) ? "open" : ""}>
+    <summary>${summary}</summary>
+    <div class="thought-detail">${esc(text)}</div>
+  </details>`
+}
+
+function renderTool(message, part, index) {
+  const toolState = part.state || {}
+  const status = toolState.status || "pending"
+  const input = toolState.input && typeof toolState.input === "object" ? toolState.input : {}
+  const command = typeof input.command === "string" ? input.command : Array.isArray(input.command) ? input.command.join(" ") : ""
+  const firstCommandLine = command.split("\n")[0]
+  const title = firstCommandLine ? `$ ${firstCommandLine}` : toolState.title || part.tool || part.name || "Tool"
+  const duration = durationLabel(toolState.time)
+  const key = partKey(message, part, index)
+  const inputText = command || (Object.keys(input).length ? detailText(input) : "")
+  const output = toolState.output ?? toolState.error ?? ""
+  const outputLabel = toolState.error ? "Error" : "Output"
+  const body = `${inputText ? `<div class="tool-detail-label">${command ? "Command" : "Input"}</div><pre class="tool-detail">${esc(command ? `$ ${inputText}` : inputText)}</pre>` : ""}
+    ${output ? `<div class="tool-detail-label">${outputLabel}</div><pre class="tool-detail ${toolState.error ? "error" : ""}">${esc(detailText(output))}</pre>` : `<div class="tool-empty">${status === "running" ? "Running…" : "No output"}</div>`}`
+  return `<details class="tool-block ${esc(status)}" data-part-key="${esc(key)}" ${state.expandedParts.has(key) ? "open" : ""}>
+    <summary>
+      <span class="tool-summary"><span class="tool-name">${esc(part.tool || part.name || "tool")}</span><span class="tool-title">${esc(title)}</span></span>
+      <span class="tool-meta"><span class="tool-status">${esc(status)}</span>${duration ? `<span class="part-duration">${duration}</span>` : ""}</span>
+    </summary>
+    <div class="tool-body">${body}</div>
+  </details>`
+}
+
+function renderMessageParts(message) {
   const parts = Array.isArray(message?.parts) ? message.parts : []
-  const tools = parts.filter((part) => part?.type === "tool")
-  if (!tools.length) return ""
-  const names = tools.map((part) => part.tool || part.name || part.state?.title || "tool")
-  return `<div class="tool-line">${esc(names.join(" · "))}</div>`
+  return parts.map((part, index) => {
+    if (part?.type === "text" && typeof part.text === "string") return `<div class="message-text">${esc(part.text)}</div>`
+    if (part?.type === "reasoning") return renderReasoning(message, part, index)
+    if (part?.type === "tool") return renderTool(message, part, index)
+    return ""
+  }).filter(Boolean).join("")
 }
 
 function renderMessages() {
@@ -196,12 +244,11 @@ function renderMessages() {
   if (!state.messages.length) return `<div class="empty">No messages yet.</div>`
   return `<div class="messages">${state.messages.map((message) => {
     const role = message?.info?.role || message?.role || "assistant"
-    const text = messageText(message)
-    if (!text && !toolSummary(message)) return ""
+    const parts = renderMessageParts(message)
+    if (!parts) return ""
     return `<article class="message ${esc(role)}">
       <div class="message-role">${esc(role)}</div>
-      ${text ? `<div class="message-text">${esc(text)}</div>` : ""}
-      ${toolSummary(message)}
+      <div class="message-parts">${parts}</div>
     </article>`
   }).join("")}</div>`
 }
@@ -524,6 +571,19 @@ app.addEventListener("input", (event) => {
     persistDrafts()
   }
 })
+
+app.addEventListener("toggle", (event) => {
+  const details = event.target.closest("details[data-part-key]")
+  if (!details) return
+  const key = details.dataset.partKey
+  if (details.open) {
+    state.expandedParts.add(key)
+    state.followMessages = false
+  } else {
+    state.expandedParts.delete(key)
+    state.followMessages = isNearBottom()
+  }
+}, true)
 
 app.addEventListener("keydown", (event) => {
   const textarea = event.target.closest("[data-composer] textarea")

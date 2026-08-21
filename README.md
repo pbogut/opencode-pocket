@@ -7,6 +7,7 @@ Current MVP:
 - lists OpenCode sessions as agents
 - shows working, retry, idle and needs-input states
 - shows conversation history and updates it while the agent writes
+- shows reasoning stages and collapsible tool inputs, outputs and errors
 - renders structured `question.asked` prompts as native mobile controls
 - replies to and rejects questions
 - renders permission requests with Allow once, Always allow and Reject
