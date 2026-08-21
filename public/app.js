@@ -1,13 +1,44 @@
 const app = document.querySelector("#app")
 
+const DRAFTS_KEY = "opencode-pocket-drafts-v1"
+const savedDrafts = loadDrafts()
+
 const state = {
   snapshot: { connected: false, sessions: [], questions: [], permissions: [] },
   routeSessionId: sessionFromHash(),
   messages: [],
   loadingMessages: false,
-  questionAnswers: new Map(),
+  messageDrafts: new Map(draftEntries(savedDrafts.messages).filter(([, value]) => typeof value === "string")),
+  questionAnswers: new Map(draftEntries(savedDrafts.questions).filter(([, value]) => Array.isArray(value))),
   toast: "",
   refreshTimer: null,
+  viewKey: "",
+  renderedMessages: "",
+  renderedAttention: "",
+}
+
+function draftEntries(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? Object.entries(value) : []
+}
+
+function loadDrafts() {
+  try {
+    const value = JSON.parse(localStorage.getItem(DRAFTS_KEY) || "{}")
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {}
+  } catch {
+    return {}
+  }
+}
+
+function persistDrafts() {
+  try {
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify({
+      messages: Object.fromEntries(state.messageDrafts),
+      questions: Object.fromEntries(state.questionAnswers),
+    }))
+  } catch {
+    // In-memory drafts still protect input during this page session.
+  }
 }
 
 function sessionFromHash() {
@@ -141,6 +172,9 @@ function renderQuestionCard(request) {
   const questions = Array.isArray(request.questions) ? request.questions : []
   if (!state.questionAnswers.has(rid)) state.questionAnswers.set(rid, questions.map(() => []))
   const answers = state.questionAnswers.get(rid)
+  for (let index = 0; index < questions.length; index += 1) {
+    if (!Array.isArray(answers[index])) answers[index] = []
+  }
 
   return `<section class="attention-card" data-question-id="${esc(rid)}">
     <div class="attention-title">OpenCode needs your answer</div>
@@ -212,33 +246,83 @@ function renderList() {
   </div>`
 }
 
-function renderConversation() {
-  const session = sessionFor(state.routeSessionId)
-  if (!session) return `<div class="shell"><header class="topbar"><button class="icon-button" data-back>←</button><h1>Session</h1></header><div class="empty">Session not found.</div></div>`
-  const status = statusFor(session)
+function renderConversationShell() {
+  const draft = state.messageDrafts.get(state.routeSessionId) || ""
   return `<div class="shell conversation">
     <header class="topbar">
       <button class="icon-button" data-back aria-label="Back">←</button>
       <div style="min-width:0;flex:1">
-        <h1 style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(titleFor(session))}</h1>
-        <div class="connection"><span class="badge ${status.className}">${esc(status.label)}</span></div>
+        <h1 data-session-title style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></h1>
+        <div class="connection"><span class="badge idle" data-session-status>idle</span></div>
       </div>
       <button class="icon-button" data-abort title="Abort session">■</button>
     </header>
-    <div class="meta">${esc(session.directory || session.id)}</div>
-    ${renderQuestionCard(pendingQuestion(session.id))}
-    ${renderPermissionCard(pendingPermission(session.id))}
-    ${renderMessages()}
+    <div class="meta" data-session-meta></div>
+    <div data-attention></div>
+    <div data-messages></div>
     <div class="composer-wrap"><form class="composer" data-composer>
-      <textarea name="message" rows="1" placeholder="Message OpenCode…" autocomplete="off"></textarea>
+      <textarea name="message" rows="1" placeholder="Message OpenCode…" autocomplete="off">${esc(draft)}</textarea>
       <button type="submit">Send</button>
     </form></div>
-    ${state.toast ? `<div class="toast">${esc(state.toast)}</div>` : ""}
+    <div data-toast></div>
   </div>`
 }
 
+function updateAttention(force = false) {
+  const slot = app.querySelector("[data-attention]")
+  if (!slot) return
+  const question = pendingQuestion(state.routeSessionId)
+  const permission = pendingPermission(state.routeSessionId)
+  const key = JSON.stringify([question || null, permission || null])
+  if (!force && state.renderedAttention === key) return
+  slot.innerHTML = `${renderQuestionCard(question)}${renderPermissionCard(permission)}`
+  state.renderedAttention = key
+}
+
+function updateConversation(session) {
+  const status = statusFor(session)
+  app.querySelector("[data-session-title]").textContent = titleFor(session)
+  app.querySelector("[data-session-meta]").textContent = session.directory || session.id
+  const badge = app.querySelector("[data-session-status]")
+  badge.textContent = status.label
+  badge.className = `badge ${status.className}`
+
+  updateAttention()
+
+  const messages = renderMessages()
+  if (state.renderedMessages !== messages) {
+    app.querySelector("[data-messages]").innerHTML = messages
+    state.renderedMessages = messages
+  }
+
+  app.querySelector("[data-toast]").innerHTML = state.toast ? `<div class="toast">${esc(state.toast)}</div>` : ""
+}
+
 function render() {
-  app.innerHTML = state.routeSessionId ? renderConversation() : renderList()
+  if (!state.routeSessionId) {
+    state.viewKey = "list"
+    app.innerHTML = renderList()
+    return
+  }
+
+  const session = sessionFor(state.routeSessionId)
+  if (!session) {
+    const key = `missing:${state.routeSessionId}`
+    if (state.viewKey !== key) {
+      app.innerHTML = `<div class="shell"><header class="topbar"><button class="icon-button" data-back>←</button><h1>Session</h1></header><div class="empty">Session not found.</div></div>`
+      state.viewKey = key
+    }
+    return
+  }
+
+  const key = `conversation:${state.routeSessionId}`
+  if (state.viewKey !== key) {
+    app.innerHTML = renderConversationShell()
+    state.viewKey = key
+    state.renderedMessages = ""
+    state.renderedAttention = ""
+  }
+  updateConversation(session)
 }
 
 function selectedAnswersFromCard(card) {
@@ -252,8 +336,34 @@ function selectedAnswersFromCard(card) {
       answers[index] = [...(answers[index] || []).filter((x) => options.includes(x)), custom]
     }
   })
+  state.questionAnswers.set(rid, answers)
+  persistDrafts()
   return answers
 }
+
+app.addEventListener("input", (event) => {
+  const input = event.target
+  if (input.matches("[data-composer] textarea")) {
+    if (input.value) state.messageDrafts.set(state.routeSessionId, input.value)
+    else state.messageDrafts.delete(state.routeSessionId)
+    persistDrafts()
+    return
+  }
+
+  if (input.matches("[data-custom-answer]")) {
+    const card = input.closest("[data-question-id]")
+    const group = input.closest("[data-question-index]")
+    if (!card || !group) return
+    const rid = card.dataset.questionId
+    const index = Number(group.dataset.questionIndex)
+    const answers = state.questionAnswers.get(rid) || []
+    const options = [...group.querySelectorAll("[data-answer-option]")].map((button) => button.dataset.answerOption)
+    const selected = (answers[index] || []).filter((answer) => options.includes(answer))
+    answers[index] = input.value ? [...selected, input.value] : selected
+    state.questionAnswers.set(rid, answers)
+    persistDrafts()
+  }
+})
 
 app.addEventListener("click", async (event) => {
   const target = event.target.closest("button")
@@ -290,12 +400,15 @@ app.addEventListener("click", async (event) => {
     const rid = card.dataset.questionId
     const index = Number(group.dataset.questionIndex)
     const answers = state.questionAnswers.get(rid)
+    const selected = answers[index] || []
     const label = option.dataset.answerOption
     if (option.dataset.multiple === "true") {
-      answers[index] = answers[index].includes(label) ? answers[index].filter((x) => x !== label) : [...answers[index], label]
+      answers[index] = selected.includes(label) ? selected.filter((x) => x !== label) : [...selected, label]
     } else {
       answers[index] = [label]
     }
+    persistDrafts()
+    state.renderedAttention = ""
     render()
     return
   }
@@ -308,6 +421,7 @@ app.addEventListener("click", async (event) => {
     try {
       await api(`/api/questions/${encodeURIComponent(rid)}/reply`, { method: "POST", body: JSON.stringify({ answers }) })
       state.questionAnswers.delete(rid)
+      persistDrafts()
       showToast("Answer sent")
     } catch (error) { showToast(error.message) }
     return
@@ -315,7 +429,12 @@ app.addEventListener("click", async (event) => {
 
   if (target.hasAttribute("data-reject-question")) {
     const rid = target.closest("[data-question-id]").dataset.questionId
-    try { await api(`/api/questions/${encodeURIComponent(rid)}/reject`, { method: "POST" }); showToast("Question rejected") } catch (error) { showToast(error.message) }
+    try {
+      await api(`/api/questions/${encodeURIComponent(rid)}/reject`, { method: "POST" })
+      state.questionAnswers.delete(rid)
+      persistDrafts()
+      showToast("Question rejected")
+    } catch (error) { showToast(error.message) }
     return
   }
 
@@ -339,12 +458,14 @@ app.addEventListener("submit", async (event) => {
   const textarea = form.elements.message
   const text = textarea.value.trim()
   if (!text) return
-  textarea.value = ""
+  const sid = state.routeSessionId
   try {
-    await api(`/api/sessions/${encodeURIComponent(state.routeSessionId)}/messages`, { method: "POST", body: JSON.stringify({ text }) })
+    await api(`/api/sessions/${encodeURIComponent(sid)}/messages`, { method: "POST", body: JSON.stringify({ text }) })
+    state.messageDrafts.delete(sid)
+    persistDrafts()
+    textarea.value = ""
     scheduleMessagesRefresh()
   } catch (error) {
-    textarea.value = text
     showToast(error.message)
   }
 })
@@ -372,6 +493,10 @@ source.addEventListener("state", (event) => {
 })
 source.addEventListener("agent-event", (message) => {
   const event = JSON.parse(message.data)
+  if ((event.type === "question.replied" || event.type === "question.rejected") && event.requestId) {
+    state.questionAnswers.delete(event.requestId)
+    persistDrafts()
+  }
   maybeNotify(event)
   if (state.routeSessionId && event.sessionId === state.routeSessionId && ["message.part", "message.updated", "session.status"].includes(event.type)) scheduleMessagesRefresh()
 })
