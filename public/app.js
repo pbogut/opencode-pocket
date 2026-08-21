@@ -1,6 +1,7 @@
 const app = document.querySelector("#app")
 
 const DRAFTS_KEY = "opencode-pocket-drafts-v1"
+const BOTTOM_THRESHOLD = 80
 const savedDrafts = loadDrafts()
 
 const state = {
@@ -15,6 +16,7 @@ const state = {
   viewKey: "",
   renderedMessages: "",
   renderedAttention: "",
+  followMessages: true,
 }
 
 function draftEntries(value) {
@@ -163,6 +165,20 @@ function renderMessages() {
   }).join("")}</div>`
 }
 
+function isNearBottom() {
+  const remaining = document.documentElement.scrollHeight - window.innerHeight - window.scrollY
+  return remaining <= BOTTOM_THRESHOLD
+}
+
+function scrollToLatest() {
+  const sessionId = state.routeSessionId
+  requestAnimationFrame(() => {
+    if (state.followMessages && state.routeSessionId === sessionId) {
+      window.scrollTo(0, document.documentElement.scrollHeight)
+    }
+  })
+}
+
 function questionId(q) { return q?.id || q?.requestID || q?.requestId || "" }
 function permissionId(p) { return p?.id || p?.requestID || p?.requestId || p?.permissionID || "" }
 
@@ -293,6 +309,7 @@ function updateConversation(session) {
   if (state.renderedMessages !== messages) {
     app.querySelector("[data-messages]").innerHTML = messages
     state.renderedMessages = messages
+    if (state.followMessages) scrollToLatest()
   }
 
   app.querySelector("[data-toast]").innerHTML = state.toast ? `<div class="toast">${esc(state.toast)}</div>` : ""
@@ -321,6 +338,7 @@ function render() {
     state.viewKey = key
     state.renderedMessages = ""
     state.renderedAttention = ""
+    state.followMessages = true
   }
   updateConversation(session)
 }
@@ -476,6 +494,10 @@ window.addEventListener("hashchange", () => {
   render()
   if (state.routeSessionId) loadMessages()
 })
+
+window.addEventListener("scroll", () => {
+  if (state.routeSessionId) state.followMessages = isNearBottom()
+}, { passive: true })
 
 function maybeNotify(event) {
   if (!("Notification" in window) || Notification.permission !== "granted") return
