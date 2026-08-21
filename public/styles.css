@@ -27,6 +27,8 @@ button { color: inherit; }
 .topbar-row { display: flex; align-items: center; gap: 10px; }
 .icon-button, .button { border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 10px 12px; cursor: pointer; }
 .icon-button { min-width: 42px; }
+.refresh-button.refreshing span { display: inline-block; animation: refresh-spin .5s ease-in-out; }
+@keyframes refresh-spin { to { transform: rotate(360deg); } }
 .changes-button { position: relative; }
 .changes-button small { position: absolute; top: -5px; right: -5px; min-width: 17px; height: 17px; display: grid; place-items: center; border: 2px solid var(--bg); border-radius: 999px; background: var(--ok); padding: 0 4px; color: #0b0d10; font-size: 9px; font-weight: 800; }
 .changes-button small:empty { display: none; }
@@ -161,6 +163,7 @@ body.changes-open { overflow: hidden; }
 .agent-drawer-header { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--line); padding: calc(14px + env(safe-area-inset-top)) 14px 12px; }
 .agent-drawer-header h2 { margin: 0; font-size: 17px; }
 .agent-drawer-header p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+.agent-drawer-actions { display: flex; align-items: center; gap: 8px; }
 .agent-drawer-content { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 12px 14px calc(18px + env(safe-area-inset-bottom)); }
 .agent-drawer-content .agent-list { padding: 0; }
 body.agent-drawer-open { overflow: hidden; }
@@ -244,4 +247,5 @@ body.sessions-open { overflow: hidden; }
   .thought-block > summary::before, .tool-block > summary::before { transition: none; }
   .diff-block > summary::before, .diff-file > summary::before, .change-turn > summary::before { transition: none; }
   .composer .dictate-button.recording { animation: none; }
+  .refresh-button.refreshing span { animation: none; }
 }

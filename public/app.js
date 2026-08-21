@@ -644,7 +644,7 @@ function renderList() {
         <div class="connection"><span class="dot ${state.snapshot.connected ? "connected" : ""}"></span>${state.snapshot.connected ? "live" : "reconnecting"}</div>
       </div>
       <button class="icon-button" data-notifications title="Enable notifications">🔔</button>
-      <button class="icon-button" data-refresh title="Refresh">↻</button>
+      <button class="icon-button refresh-button" data-refresh aria-label="Refresh agents" title="Refresh"><span aria-hidden="true">↻</span></button>
     </header>
     ${renderAgentList(instances)}
     ${state.toast ? `<div class="toast">${esc(state.toast)}</div>` : ""}
@@ -674,7 +674,10 @@ function renderConversationShell() {
       <aside class="agent-drawer" role="dialog" aria-modal="true" aria-labelledby="agent-drawer-title">
         <header class="agent-drawer-header">
           <div><h2 id="agent-drawer-title">Agents</h2><p data-agent-drawer-summary></p></div>
-          <button type="button" class="icon-button" data-close-agents aria-label="Close agents">×</button>
+          <div class="agent-drawer-actions">
+            <button type="button" class="icon-button refresh-button" data-refresh aria-label="Refresh agents" title="Refresh"><span aria-hidden="true">↻</span></button>
+            <button type="button" class="icon-button" data-close-agents aria-label="Close agents">×</button>
+          </div>
         </header>
         <div class="agent-drawer-content" data-agent-drawer-content></div>
       </aside>
@@ -1417,6 +1420,10 @@ app.addEventListener("click", async (event) => {
     return
   }
   if (target.hasAttribute("data-refresh")) {
+    target.classList.remove("refreshing")
+    void target.offsetWidth
+    target.classList.add("refreshing")
+    target.addEventListener("animationend", () => target.classList.remove("refreshing"), { once: true })
     try { applySnapshot(await api("/api/refresh", { method: "POST" })) } catch (error) { showToast(error.message) }
     return
   }
