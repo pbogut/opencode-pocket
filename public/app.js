@@ -520,7 +520,9 @@ function renderConversationShell() {
             <span class="activity-ring" aria-hidden="true"></span>
             <span class="stop-square" aria-hidden="true"></span>
           </button>
-          <button type="submit">Send</button>
+          <button type="submit" class="send-button" aria-label="Send message" title="Send message">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="m22 2-11 11"></path></svg>
+          </button>
         </div>
       </form>
     </div>

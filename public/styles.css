@@ -165,6 +165,8 @@ body.changes-open { overflow: hidden; }
 .composer textarea { width: 100%; resize: none; max-height: 150px; min-height: 42px; border: 0; outline: none; background: transparent; color: var(--text); padding: 10px; }
 .composer button { border-radius: 12px; border: 0; background: var(--text); color: #111318; padding: 11px 15px; font-weight: 700; }
 .composer-actions { display: flex; gap: 8px; align-items: center; }
+.composer .send-button { display: grid; width: 42px; height: 42px; padding: 0; place-items: center; }
+.send-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .composer .stop-button { position: relative; display: grid; width: 42px; height: 42px; padding: 0; place-items: center; overflow: hidden; border: 1px solid #694046; background: #28191c; color: var(--danger); }
 .composer .stop-button[hidden] { display: none; }
 .activity-ring { position: absolute; width: 24px; height: 24px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: activity-spin .9s linear infinite; }
