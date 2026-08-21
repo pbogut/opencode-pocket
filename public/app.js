@@ -278,7 +278,13 @@ function renderConversationShell() {
     <div data-messages></div>
     <div class="composer-wrap"><form class="composer" data-composer>
       <textarea name="message" rows="1" placeholder="Message OpenCode…" autocomplete="off">${esc(draft)}</textarea>
-      <button type="submit">Send</button>
+      <div class="composer-actions">
+        <button type="button" class="stop-button" data-stop hidden aria-label="Stop current request" title="Stop current request">
+          <span class="activity-ring" aria-hidden="true"></span>
+          <span class="stop-square" aria-hidden="true"></span>
+        </button>
+        <button type="submit">Send</button>
+      </div>
     </form></div>
     <div data-toast></div>
   </div>`
@@ -302,6 +308,13 @@ function updateConversation(session) {
   const badge = app.querySelector("[data-session-status]")
   badge.textContent = status.label
   badge.className = `badge ${status.className}`
+  const stop = app.querySelector("[data-stop]")
+  const activity = session.status?.type
+  const active = !session.attention && (activity === "busy" || activity === "retry")
+  stop.hidden = !active
+  stop.classList.toggle("retry", activity === "retry")
+  stop.setAttribute("aria-label", activity === "retry" ? "Agent is retrying. Stop current request" : "Agent is working. Stop current request")
+  stop.title = activity === "retry" ? "Agent is retrying. Stop current request" : "Agent is working. Stop current request"
 
   updateAttention()
 
@@ -408,6 +421,18 @@ app.addEventListener("click", async (event) => {
   if (target.hasAttribute("data-abort")) {
     if (!confirm("Abort this OpenCode session?")) return
     try { await api(`/api/sessions/${encodeURIComponent(state.routeSessionId)}/abort`, { method: "POST" }); showToast("Abort sent") } catch (error) { showToast(error.message) }
+    return
+  }
+  if (target.hasAttribute("data-stop")) {
+    target.disabled = true
+    try {
+      await api(`/api/sessions/${encodeURIComponent(state.routeSessionId)}/abort`, { method: "POST" })
+      showToast("Stop sent")
+    } catch (error) {
+      showToast(error.message)
+    } finally {
+      target.disabled = false
+    }
     return
   }
 

@@ -65,8 +65,16 @@ button { color: inherit; }
 .permission-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #0f1217; border-radius: 10px; padding: 10px; white-space: pre-wrap; word-break: break-word; font-size: 12px; color: #d9dce2; }
 .composer-wrap { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 18%); }
 .composer { max-width: 732px; margin: 0 auto; display: flex; gap: 8px; align-items: end; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); padding: 8px; }
-.composer textarea { flex: 1; resize: none; max-height: 150px; min-height: 42px; border: 0; outline: none; background: transparent; color: var(--text); padding: 10px; }
+.composer textarea { min-width: 0; flex: 1; resize: none; max-height: 150px; min-height: 42px; border: 0; outline: none; background: transparent; color: var(--text); padding: 10px; }
 .composer button { border-radius: 12px; border: 0; background: var(--text); color: #111318; padding: 11px 15px; font-weight: 700; }
+.composer-actions { display: flex; gap: 8px; align-items: center; }
+.composer .stop-button { position: relative; display: grid; width: 42px; height: 42px; padding: 0; place-items: center; overflow: hidden; border: 1px solid #694046; background: #28191c; color: var(--danger); }
+.composer .stop-button[hidden] { display: none; }
+.activity-ring { position: absolute; width: 24px; height: 24px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: activity-spin .9s linear infinite; }
+.stop-square { width: 9px; height: 9px; border-radius: 2px; background: currentColor; }
+.stop-button.retry .activity-ring { animation-duration: 1.5s; }
+@keyframes activity-spin { to { transform: rotate(360deg); } }
 .meta { color: var(--muted); font-size: 12px; margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .toast { position: fixed; left: 50%; bottom: 95px; transform: translateX(-50%); background: #242933; border: 1px solid var(--line); border-radius: 12px; padding: 10px 13px; font-size: 13px; z-index: 30; max-width: min(90vw, 560px); }
+@media (prefers-reduced-motion: reduce) { .activity-ring { animation: none; border-style: dotted; } }
 @media (min-width: 700px) { .shell { padding-left: 22px; padding-right: 22px; } }
