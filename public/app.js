@@ -613,7 +613,7 @@ function renderList(instanceId = "") {
   return `<div class="shell">
     <header class="topbar">
       ${instance ? `<button class="icon-button" data-back aria-label="Back">←</button>` : ""}
-      <div>
+      <div class="topbar-title">
         <h1>${esc(instance ? instanceTitle(instance) : "OpenCode Pocket")}</h1>
         <div class="connection"><span class="dot ${(instance ? instance.connected : state.snapshot.connected) ? "connected" : ""}"></span>${instance ? esc(instanceMetadata(instance) || (instance.connected ? "live" : "offline")) : state.snapshot.connected ? "live" : "reconnecting"}</div>
       </div>
