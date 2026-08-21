@@ -47,7 +47,19 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
       ])
     }
     if (url.pathname === "/session/ses_1/message" && req.method === "GET") {
-      return sendJson(res, [{ info: { role: "assistant" }, parts: [{ type: "text", text: "Working" }] }])
+      return sendJson(res, [
+        { info: { id: "msg_user", role: "user" }, parts: [{ type: "text", text: "Update the app" }] },
+        {
+          info: { id: "msg_assistant", parentID: "msg_user", role: "assistant", time: { created: 123 } },
+          parts: [
+            { type: "text", text: "Working" },
+            { id: "prt_patch", type: "patch", files: [`${projectDir}/public/app.js`] },
+          ],
+        },
+      ])
+    }
+    if (url.pathname === "/session/ses_1/diff" && req.method === "GET") {
+      return sendJson(res, [{ file: "public/app.js", status: "modified", additions: 3, deletions: 1, patch: "@@ -1 +1 @@\n-old\n+new" }])
     }
     if (url.pathname === "/session/ses_1/prompt_async" && req.method === "POST") {
       res.writeHead(204); return res.end()
@@ -90,7 +102,24 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
 
   assert.equal(bridge.snapshot().sessions[0].status.type, "busy")
   const messages = await bridge.listMessages("ses_1")
-  assert.equal(messages[0].parts[0].text, "Working")
+  assert.equal(messages[1].parts[0].text, "Working")
+  assert.deepEqual(await bridge.listChangeTurns("ses_1"), [{
+    messageId: "msg_user",
+    assistantMessageId: "msg_assistant",
+    title: "Update the app",
+    time: 123,
+    files: ["public/app.js"],
+  }])
+  assert.deepEqual(await bridge.getMessageDiff("ses_1", "msg_user"), [{
+    file: "public/app.js",
+    status: "modified",
+    additions: 3,
+    deletions: 1,
+    patch: "@@ -1 +1 @@\n-old\n+new",
+  }])
+  const diffCall = calls.find((call) => call.path === "/session/ses_1/diff")
+  assert.equal(new URLSearchParams(diffCall.search).get("messageID"), "msg_user")
+  assert.equal(new URLSearchParams(diffCall.search).get("directory"), projectDir)
   assert.deepEqual(await bridge.listAgents("ses_1"), [
     { name: "build", description: "Build mode", mode: "primary", color: "" },
     { name: "review", description: "Review changes", mode: "all", color: "" },

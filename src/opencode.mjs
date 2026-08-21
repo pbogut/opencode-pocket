@@ -306,6 +306,56 @@ export class OpenCodeBridge extends EventEmitter {
     return Array.isArray(data) ? data : []
   }
 
+  async listChangeTurns(sid) {
+    const messages = await this.listMessages(sid, 300)
+    const prompts = new Map()
+    const turns = new Map()
+    const directory = this.directoryForSession(sid).replace(/\/$/, "")
+
+    for (const message of messages) {
+      const info = message?.info || message
+      if (info?.role !== "user" || !info.id) continue
+      const text = (Array.isArray(message?.parts) ? message.parts : [])
+        .filter((part) => part?.type === "text" && typeof part.text === "string")
+        .map((part) => part.text)
+        .join("\n")
+      prompts.set(info.id, (text.split("\n").find((line) => line.trim())?.trim() || "User request").slice(0, 200))
+    }
+
+    for (const message of messages) {
+      const info = message?.info || message
+      const patchParts = (Array.isArray(message?.parts) ? message.parts : []).filter((part) => part?.type === "patch")
+      if (!info?.parentID || patchParts.length === 0) continue
+      const turn = turns.get(info.parentID) || {
+        messageId: info.parentID,
+        assistantMessageId: info.id || "",
+        title: prompts.get(info.parentID) || "Changed files",
+        time: info.time?.created || 0,
+        files: new Set(),
+      }
+      for (const part of patchParts) {
+        for (const file of Array.isArray(part.files) ? part.files : []) {
+          turn.files.add(directory && file.startsWith(`${directory}/`) ? file.slice(directory.length + 1) : file)
+        }
+      }
+      turns.set(info.parentID, turn)
+    }
+
+    return [...turns.values()].map((turn) => ({ ...turn, files: [...turn.files] }))
+  }
+
+  async getMessageDiff(sid, messageId) {
+    const path = this.pathForSession(`/session/${encodeURIComponent(sid)}/diff?messageID=${encodeURIComponent(messageId)}`, sid)
+    const data = await this.request(path)
+    return (Array.isArray(data) ? data : []).map((item) => ({
+      file: item?.file || item?.path || "",
+      status: item?.status || "modified",
+      additions: Number(item?.additions || 0),
+      deletions: Number(item?.deletions || 0),
+      patch: typeof item?.patch === "string" ? item.patch : "",
+    }))
+  }
+
   async listAgents(sid) {
     const data = await this.request(this.pathForSession("/agent", sid))
     return (Array.isArray(data) ? data : [])

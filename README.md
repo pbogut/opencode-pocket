@@ -8,6 +8,7 @@ Current MVP:
 - shows working, retry, idle and needs-input states
 - shows conversation history and updates it while the agent writes
 - shows reasoning stages and collapsible tool inputs, outputs and errors
+- shows inline turn diffs and session change history
 - renders structured `question.asked` prompts as native mobile controls
 - replies to and rejects questions
 - renders permission requests with Allow once, Always allow and Reject
@@ -108,6 +109,8 @@ POST /api/refresh
 
 GET  /api/sessions/:id/messages
 POST /api/sessions/:id/messages
+GET  /api/sessions/:id/changes
+GET  /api/sessions/:id/diff?messageId=:message
 GET  /api/sessions/:id/agents
 POST /api/sessions/:id/agent
 POST /api/sessions/:id/abort
@@ -134,7 +137,7 @@ There is also a known issue in some OpenCode 1.17.x builds where permissions cre
 - Web Push when the PWA is fully closed
 - authentication on Pocket itself
 - terminal fallback
-- diffs and todos
+- todos
 - file uploads
 - markdown rendering
 

@@ -13,6 +13,14 @@ const state = {
   agentSessionId: "",
   switchingAgentSession: "",
   selectedAgents: new Map(),
+  changes: [],
+  changesSessionId: "",
+  loadingChangesSession: "",
+  changesOpen: false,
+  changesTimer: null,
+  diffs: new Map(),
+  diffErrors: new Map(),
+  loadingDiffs: new Set(),
   messageDrafts: new Map(draftEntries(savedDrafts.messages).filter(([, value]) => typeof value === "string")),
   questionAnswers: new Map(draftEntries(savedDrafts.questions).filter(([, value]) => Array.isArray(value))),
   toast: "",
@@ -21,6 +29,7 @@ const state = {
   renderedMessages: "",
   renderedAttention: "",
   renderedAgents: "",
+  renderedChanges: "",
   attentionRequest: "",
   attentionCollapsed: false,
   followMessages: true,
@@ -165,14 +174,55 @@ async function loadAgents() {
   }
 }
 
+async function loadChanges({ quiet = false } = {}) {
+  const sid = state.routeSessionId
+  if (!sid || state.loadingChangesSession === sid) return
+  state.loadingChangesSession = sid
+  if (!quiet) render()
+  try {
+    const changes = await api(`/api/sessions/${encodeURIComponent(sid)}/changes`)
+    if (state.routeSessionId !== sid) return
+    state.changes = Array.isArray(changes) ? changes : []
+    state.changesSessionId = sid
+    state.renderedChanges = ""
+  } catch (error) {
+    if (state.routeSessionId === sid) showToast(error.message)
+  } finally {
+    if (state.loadingChangesSession === sid) state.loadingChangesSession = ""
+    if (state.routeSessionId === sid) render()
+  }
+}
+
+async function loadDiff(messageId) {
+  const sid = state.routeSessionId
+  if (!sid || !messageId || state.diffs.has(messageId) || state.loadingDiffs.has(messageId)) return
+  state.loadingDiffs.add(messageId)
+  state.diffErrors.delete(messageId)
+  render()
+  try {
+    const diff = await api(`/api/sessions/${encodeURIComponent(sid)}/diff?messageId=${encodeURIComponent(messageId)}`)
+    if (state.routeSessionId === sid) state.diffs.set(messageId, Array.isArray(diff) ? diff : [])
+  } catch (error) {
+    if (state.routeSessionId === sid) state.diffErrors.set(messageId, error.message)
+  } finally {
+    state.loadingDiffs.delete(messageId)
+    if (state.routeSessionId === sid) render()
+  }
+}
+
 async function loadConversation() {
   await loadMessages()
-  await loadAgents()
+  await Promise.all([loadAgents(), loadChanges()])
 }
 
 function scheduleMessagesRefresh() {
   clearTimeout(state.refreshTimer)
   state.refreshTimer = setTimeout(() => loadMessages({ quiet: true }), 180)
+}
+
+function scheduleChangesRefresh() {
+  clearTimeout(state.changesTimer)
+  state.changesTimer = setTimeout(() => loadChanges({ quiet: true }), 220)
 }
 
 function durationLabel(time) {
@@ -230,12 +280,85 @@ function renderTool(message, part, index) {
   </details>`
 }
 
+function diffLineClass(line) {
+  if (line.startsWith("@@")) return "hunk"
+  if (line.startsWith("diff ") || line.startsWith("index ") || line.startsWith("---") || line.startsWith("+++")) return "header"
+  if (line.startsWith("+")) return "addition"
+  if (line.startsWith("-")) return "deletion"
+  return "context"
+}
+
+function renderPatchLines(patch) {
+  return String(patch || "").split("\n").map((line) => `<span class="diff-line ${diffLineClass(line)}">${esc(line || " ")}</span>`).join("")
+}
+
+function renderDiffFiles(messageId) {
+  if (state.loadingDiffs.has(messageId)) return `<div class="diff-loading">Loading patch…</div>`
+  if (state.diffErrors.has(messageId)) return `<div class="diff-error">${esc(state.diffErrors.get(messageId))}</div>`
+  if (!state.diffs.has(messageId)) return `<div class="diff-loading">Expand to load patch.</div>`
+  const files = state.diffs.get(messageId)
+  if (!files.length) return `<div class="diff-loading">No diff is available for this turn.</div>`
+  return `<div class="diff-files">${files.map((file) => {
+    const path = file.file || "Changed file"
+    const key = `diff-file:${messageId}:${path}`
+    const status = { added: "A", deleted: "D", modified: "M" }[file.status] || "M"
+    return `<details class="diff-file ${esc(file.status)}" data-part-key="${esc(key)}" ${state.expandedParts.has(key) ? "open" : ""}>
+      <summary>
+        <span class="diff-file-main"><span class="diff-status">${status}</span><span class="diff-path">${esc(path)}</span></span>
+        <span class="diff-counts"><span>+${Number(file.additions || 0)}</span><span>−${Number(file.deletions || 0)}</span></span>
+      </summary>
+      <pre class="diff-patch"><code>${renderPatchLines(file.patch)}</code></pre>
+    </details>`
+  }).join("")}</div>`
+}
+
+function renderPatchPart(message, part, index) {
+  const info = message?.info || message
+  const messageId = info?.parentID || ""
+  const key = `patch:${partKey(message, part, index)}`
+  const files = [...new Set(Array.isArray(part.files) ? part.files : [])]
+  return `<details class="diff-block" data-part-key="${esc(key)}" ${messageId ? `data-diff-message="${esc(messageId)}"` : ""} ${state.expandedParts.has(key) ? "open" : ""}>
+    <summary>
+      <span class="diff-summary"><strong>Changes</strong><span>${files.length} ${files.length === 1 ? "file" : "files"}</span></span>
+    </summary>
+    <div class="diff-body">${messageId ? renderDiffFiles(messageId) : `<div class="diff-error">The turn ID is unavailable.</div>`}</div>
+  </details>`
+}
+
+function diffTotals(files) {
+  return (Array.isArray(files) ? files : []).reduce((totals, file) => ({
+    additions: totals.additions + Number(file.additions || 0),
+    deletions: totals.deletions + Number(file.deletions || 0),
+  }), { additions: 0, deletions: 0 })
+}
+
+function renderChangeTurn(change) {
+  const key = `change-turn:${change.messageId}`
+  const files = state.diffs.get(change.messageId)
+  const totals = diffTotals(files)
+  const counts = files ? `<span class="diff-counts"><span>+${totals.additions}</span><span>−${totals.deletions}</span></span>` : ""
+  return `<details class="change-turn" data-part-key="${esc(key)}" data-diff-message="${esc(change.messageId)}" ${state.expandedParts.has(key) ? "open" : ""}>
+    <summary>
+      <span class="change-turn-main"><strong>${esc(change.title || "Changed files")}</strong><small>${change.files?.length || 0} ${(change.files?.length || 0) === 1 ? "file" : "files"}${change.time ? ` · ${esc(prettyTime(change.time))}` : ""}</small></span>
+      ${counts}
+    </summary>
+    <div class="change-turn-body">${renderDiffFiles(change.messageId)}</div>
+  </details>`
+}
+
+function renderChangesDrawer() {
+  if (state.loadingChangesSession === state.routeSessionId && !state.changes.length) return `<div class="changes-empty">Loading change history…</div>`
+  if (!state.changes.length) return `<div class="changes-empty">No file changes in this session.</div>`
+  return `<div class="change-turns">${[...state.changes].reverse().map(renderChangeTurn).join("")}</div>`
+}
+
 function renderMessageParts(message) {
   const parts = Array.isArray(message?.parts) ? message.parts : []
   return parts.map((part, index) => {
     if (part?.type === "text" && typeof part.text === "string") return `<div class="message-text">${esc(part.text)}</div>`
     if (part?.type === "reasoning") return renderReasoning(message, part, index)
     if (part?.type === "tool") return renderTool(message, part, index)
+    if (part?.type === "patch") return renderPatchPart(message, part, index)
     return ""
   }).filter(Boolean).join("")
 }
@@ -360,10 +483,21 @@ function renderConversationShell() {
         <h1 data-session-title style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></h1>
         <div class="connection"><span class="badge idle" data-session-status>idle</span></div>
       </div>
+      <button class="icon-button changes-button" data-open-changes hidden aria-label="Open session changes" title="Session changes"><span aria-hidden="true">±</span><small data-changes-count></small></button>
       <button class="icon-button" data-abort title="Abort session">■</button>
     </header>
     <div class="meta" data-session-meta></div>
     <div data-messages></div>
+    <div class="changes-overlay" data-changes-overlay hidden>
+      <button type="button" class="changes-backdrop" data-close-changes aria-label="Close session changes"></button>
+      <section class="changes-drawer" role="dialog" aria-modal="true" aria-labelledby="changes-title">
+        <header class="changes-header">
+          <div><h2 id="changes-title">Session changes</h2><p data-changes-summary></p></div>
+          <button type="button" class="icon-button" data-close-changes aria-label="Close session changes">×</button>
+        </header>
+        <div class="changes-content" data-changes-content></div>
+      </section>
+    </div>
     <div class="composer-wrap">
       <section class="attention-sheet" data-attention-sheet hidden>
         <button type="button" class="attention-sheet-toggle" data-toggle-attention aria-expanded="true">
@@ -474,6 +608,33 @@ function updateAttention(force = false) {
   }
 }
 
+function setChangesOpen(open) {
+  state.changesOpen = open
+  document.body.classList.toggle("changes-open", open)
+  if (open) state.followMessages = false
+  else state.followMessages = isNearBottom()
+  updateChangesView()
+}
+
+function updateChangesView() {
+  const button = app.querySelector("[data-open-changes]")
+  const overlay = app.querySelector("[data-changes-overlay]")
+  const content = app.querySelector("[data-changes-content]")
+  if (!button || !overlay || !content) return
+  const changes = state.changesSessionId === state.routeSessionId ? state.changes : []
+  const uniqueFiles = new Set(changes.flatMap((change) => change.files || []))
+  button.hidden = changes.length === 0 && state.loadingChangesSession !== state.routeSessionId
+  button.querySelector("[data-changes-count]").textContent = changes.length || ""
+  button.setAttribute("aria-label", `Open ${changes.length} session change ${changes.length === 1 ? "turn" : "turns"}`)
+  overlay.hidden = !state.changesOpen
+  overlay.querySelector("[data-changes-summary]").textContent = `${changes.length} ${changes.length === 1 ? "turn" : "turns"} · ${uniqueFiles.size} ${uniqueFiles.size === 1 ? "file" : "files"}`
+  const html = renderChangesDrawer()
+  if (state.renderedChanges !== html) {
+    content.innerHTML = html
+    state.renderedChanges = html
+  }
+}
+
 function updateConversation(session) {
   const status = statusFor(session)
   app.querySelector("[data-session-title]").textContent = titleFor(session)
@@ -489,6 +650,7 @@ function updateConversation(session) {
   stop.setAttribute("aria-label", activity === "retry" ? "Agent is retrying. Stop current request" : "Agent is working. Stop current request")
   stop.title = activity === "retry" ? "Agent is retrying. Stop current request" : "Agent is working. Stop current request"
   updateAgentSelector()
+  updateChangesView()
 
   updateAttention()
 
@@ -504,6 +666,7 @@ function updateConversation(session) {
 
 function render() {
   if (!state.routeSessionId) {
+    document.body.classList.remove("changes-open")
     state.viewKey = "list"
     app.innerHTML = renderList()
     return
@@ -526,6 +689,7 @@ function render() {
     state.renderedMessages = ""
     state.renderedAttention = ""
     state.renderedAgents = ""
+    state.renderedChanges = ""
     state.attentionRequest = ""
     state.attentionCollapsed = false
     state.followMessages = true
@@ -580,6 +744,7 @@ app.addEventListener("toggle", (event) => {
   if (details.open) {
     state.expandedParts.add(key)
     state.followMessages = false
+    if (details.dataset.diffMessage) loadDiff(details.dataset.diffMessage)
   } else {
     state.expandedParts.delete(key)
     state.followMessages = isNearBottom()
@@ -587,6 +752,11 @@ app.addEventListener("toggle", (event) => {
 }, true)
 
 app.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.changesOpen) {
+    event.preventDefault()
+    setChangesOpen(false)
+    return
+  }
   const textarea = event.target.closest("[data-composer] textarea")
   if (!textarea || event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) return
   event.preventDefault()
@@ -624,6 +794,15 @@ app.addEventListener("click", async (event) => {
   if (target.hasAttribute("data-abort")) {
     if (!confirm("Abort this OpenCode session?")) return
     try { await api(`/api/sessions/${encodeURIComponent(state.routeSessionId)}/abort`, { method: "POST" }); showToast("Abort sent") } catch (error) { showToast(error.message) }
+    return
+  }
+  if (target.hasAttribute("data-open-changes")) {
+    setChangesOpen(true)
+    requestAnimationFrame(() => app.querySelector(".changes-header [data-close-changes]")?.focus())
+    return
+  }
+  if (target.hasAttribute("data-close-changes")) {
+    setChangesOpen(false)
     return
   }
   if (target.hasAttribute("data-stop")) {
@@ -731,10 +910,18 @@ app.addEventListener("submit", async (event) => {
 })
 
 window.addEventListener("hashchange", () => {
+  document.body.classList.remove("changes-open")
   state.routeSessionId = sessionFromHash()
   state.messages = []
   state.agents = []
   state.agentSessionId = ""
+  state.changes = []
+  state.changesSessionId = ""
+  state.loadingChangesSession = ""
+  state.changesOpen = false
+  state.diffs.clear()
+  state.diffErrors.clear()
+  state.loadingDiffs.clear()
   render()
   if (state.routeSessionId) loadConversation()
 })
@@ -776,6 +963,7 @@ source.addEventListener("agent-event", (message) => {
     if (event.sessionId === state.routeSessionId) render()
   }
   maybeNotify(event)
+  if (event.type === "message.part" && event.part?.type === "patch" && event.sessionId === state.routeSessionId) scheduleChangesRefresh()
   if (state.routeSessionId && event.sessionId === state.routeSessionId && ["message.part", "message.updated", "session.status"].includes(event.type)) scheduleMessagesRefresh()
 })
 

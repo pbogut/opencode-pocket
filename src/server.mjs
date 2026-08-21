@@ -133,6 +133,18 @@ const server = http.createServer(async (req, res) => {
       return json(res, 202, { ok: true })
     }
 
+    match = path.match(/^\/api\/sessions\/([^/]+)\/changes$/)
+    if (match && req.method === "GET") {
+      return json(res, 200, await bridge.listChangeTurns(decodeURIComponent(match[1])))
+    }
+
+    match = path.match(/^\/api\/sessions\/([^/]+)\/diff$/)
+    if (match && req.method === "GET") {
+      const messageId = String(url.searchParams.get("messageId") || "").trim()
+      if (!messageId) return json(res, 400, { error: "messageId is required" })
+      return json(res, 200, await bridge.getMessageDiff(decodeURIComponent(match[1]), messageId))
+    }
+
     match = path.match(/^\/api\/sessions\/([^/]+)\/agents$/)
     if (match && req.method === "GET") {
       return json(res, 200, await bridge.listAgents(decodeURIComponent(match[1])))

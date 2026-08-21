@@ -24,6 +24,9 @@ button { color: inherit; }
 .topbar h1 { font-size: 20px; margin: 0; flex: 1; }
 .icon-button, .button { border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 10px 12px; cursor: pointer; }
 .icon-button { min-width: 42px; }
+.changes-button { position: relative; }
+.changes-button small { position: absolute; top: -5px; right: -5px; min-width: 17px; height: 17px; display: grid; place-items: center; border: 2px solid var(--bg); border-radius: 999px; background: var(--ok); padding: 0 4px; color: #0b0d10; font-size: 9px; font-weight: 800; }
+.changes-button small:empty { display: none; }
 .button.primary { background: var(--text); color: #111318; border-color: var(--text); font-weight: 700; }
 .button.danger { border-color: #5c3134; color: #ffb1b1; }
 .button:disabled { opacity: .45; cursor: default; }
@@ -79,6 +82,53 @@ button { color: inherit; }
 .tool-detail.error { color: #ffb1b1; }
 .tool-empty { color: var(--muted); font-size: 11px; }
 @keyframes tool-pulse { to { opacity: .35; transform: scale(.75); } }
+.diff-block { overflow: hidden; border: 1px solid #345345; border-radius: 12px; background: #101713; }
+.diff-block > summary, .diff-file > summary, .change-turn > summary { list-style: none; cursor: pointer; }
+.diff-block > summary::-webkit-details-marker, .diff-file > summary::-webkit-details-marker, .change-turn > summary::-webkit-details-marker { display: none; }
+.diff-block > summary { min-height: 42px; display: flex; align-items: center; gap: 9px; padding: 9px 10px; }
+.diff-block > summary::before, .diff-file > summary::before, .change-turn > summary::before { flex: none; color: var(--muted); content: "›"; font-size: 16px; line-height: 1; transition: transform .15s ease; }
+.diff-block[open] > summary::before, .diff-file[open] > summary::before, .change-turn[open] > summary::before { transform: rotate(90deg); }
+.diff-summary { display: flex; align-items: baseline; gap: 7px; color: var(--muted); font-size: 11px; }
+.diff-summary strong { color: var(--ok); font-size: 12px; }
+.diff-body { border-top: 1px solid #345345; padding: 9px; }
+.diff-loading, .diff-error { padding: 8px; color: var(--muted); font-size: 11px; }
+.diff-error { color: var(--danger); }
+.diff-files { display: grid; gap: 8px; }
+.diff-file { overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #0d1110; }
+.diff-file > summary { min-height: 40px; display: flex; align-items: center; gap: 8px; padding: 8px 9px; }
+.diff-file-main { min-width: 0; flex: 1; display: flex; align-items: center; gap: 7px; }
+.diff-status { flex: none; width: 18px; color: var(--warn); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 700; text-align: center; }
+.diff-file.added .diff-status { color: var(--ok); }
+.diff-file.deleted .diff-status { color: var(--danger); }
+.diff-path { min-width: 0; overflow: hidden; color: #d9dce2; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.diff-counts { flex: none; display: flex; gap: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
+.diff-counts span:first-child { color: var(--ok); }
+.diff-counts span:last-child { color: var(--danger); }
+.diff-patch { max-height: 420px; margin: 0; overflow: auto; border-top: 1px solid var(--line); background: #090b0e; color: #c8cdd7; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; line-height: 1.5; }
+.diff-patch code { display: block; min-width: max-content; padding: 8px 0; }
+.diff-line { display: block; min-height: 1.5em; padding: 0 10px; white-space: pre; }
+.diff-line.addition { background: #10251a; color: #9de1b7; }
+.diff-line.deletion { background: #291518; color: #ffb1b1; }
+.diff-line.hunk { color: #aeb7ff; }
+.diff-line.header { color: var(--muted); font-weight: 700; }
+.changes-overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: end; justify-content: center; }
+.changes-overlay[hidden] { display: none; }
+.changes-backdrop { position: absolute; inset: 0; width: 100%; border: 0; background: rgb(0 0 0 / .66); padding: 0; }
+.changes-drawer { position: relative; width: min(100%, 760px); height: min(88dvh, 820px); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-bottom: 0; border-radius: 22px 22px 0 0; background: var(--bg); box-shadow: 0 -18px 55px rgb(0 0 0 / .55); }
+.changes-header { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--line); padding: 14px 14px 12px; }
+.changes-header h2 { margin: 0; font-size: 17px; }
+.changes-header p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+.changes-content { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 12px 14px calc(18px + env(safe-area-inset-bottom)); }
+.changes-empty { padding: 70px 20px; color: var(--muted); font-size: 13px; text-align: center; }
+.change-turns { display: grid; gap: 10px; }
+.change-turn { overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.change-turn > summary { min-height: 52px; display: flex; align-items: center; gap: 9px; padding: 10px 11px; }
+.change-turn-main { min-width: 0; flex: 1; }
+.change-turn-main strong, .change-turn-main small { display: block; }
+.change-turn-main strong { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.change-turn-main small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.change-turn-body { border-top: 1px solid var(--line); padding: 9px; }
+body.changes-open { overflow: hidden; }
 .attention-card { border: 1px solid #6c5828; background: #211c12; border-radius: 16px; padding: 14px; margin: 8px 0 14px; }
 .attention-title { color: #ffe2a6; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 10px; }
 .question { margin: 13px 0; }
@@ -128,4 +178,5 @@ button { color: inherit; }
   .tool-block.running .tool-status::before, .tool-block.pending .tool-status::before { animation: none; }
   .thought-line.thinking::before { animation: none; }
   .thought-block > summary::before, .tool-block > summary::before { transition: none; }
+  .diff-block > summary::before, .diff-file > summary::before, .change-turn > summary::before { transition: none; }
 }
