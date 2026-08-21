@@ -4,7 +4,7 @@ A mobile-first web control surface for OpenCode. It talks to OpenCode's HTTP API
 
 Current features:
 
-- discovers multiple local OpenCode instances over mDNS
+- discovers multiple local OpenCode instances through the optional TUI plugin or mDNS
 - keeps sessions and requests isolated by OpenCode instance
 - shows working, retry, idle, and needs-input states
 - streams conversation history, reasoning, tool details, and diffs
@@ -28,23 +28,33 @@ npm install
 
 ## 1. Start OpenCode
 
-Pocket discovers local OpenCode instances advertised over mDNS. Start each interactive TUI with an ephemeral loopback HTTP port:
+With the TUI plugin configured in step 3, start each interactive TUI with an ephemeral HTTP port:
 
 ```bash
-opencode --hostname 127.0.0.1 --port 0 --mdns
+opencode --port 0
 ```
 
-Use all three flags. `--port 0` gives each TUI its own port, `--mdns` advertises it, and `--hostname 127.0.0.1` prevents the API from binding to every network interface.
+`--port 0` gives each TUI its own port. OpenCode 1.18.20 defaults to `--hostname 127.0.0.1`, so the API remains available only on the local machine. The authenticated plugin report tells Pocket which loopback port belongs to that TUI.
 
-A shell wrapper keeps these flags consistent:
+A shell wrapper keeps the port flag consistent:
 
 ```bash
 op() {
-  command opencode --hostname 127.0.0.1 --port 0 --mdns "$@"
+  command opencode --port 0 "$@"
 }
 ```
 
 Each running TUI appears as a separate instance in Pocket. Session and request IDs are namespaced by instance, so overlapping IDs do not collide.
+
+### mDNS fallback
+
+Without the plugin, Pocket can still discover TUI instances over mDNS:
+
+```bash
+opencode --port 0 --mdns --hostname 127.0.0.1
+```
+
+Keep the explicit hostname when using `--mdns`. OpenCode changes the mDNS hostname default to `0.0.0.0`, which would otherwise listen on every network interface.
 
 ### Static server fallback
 
@@ -64,7 +74,7 @@ If OpenCode uses Basic auth, configure the same credentials in Pocket:
 
 ```bash
 # Terminal 1
-OPENCODE_SERVER_PASSWORD='strong-password' opencode --hostname 127.0.0.1 --port 0 --mdns
+OPENCODE_SERVER_PASSWORD='strong-password' opencode --port 0
 
 # Terminal 2
 OPENCODE_PASSWORD='strong-password' npm start
@@ -115,7 +125,7 @@ If the package is installed from npm, replace the file URL with `"opencode-pocke
 
 The plugin and Pocket use the same default token path. To override it, set `OPENCODE_POCKET_TOKEN_FILE` for both processes or add `"tokenFile"` to the plugin options. You may instead provide the token directly through `OPENCODE_POCKET_TOKEN` to both processes.
 
-Quit and restart OpenCode after changing `tui.json`; OpenCode loads TUI plugins only at startup. Continue starting the TUI with `--hostname 127.0.0.1 --port 0 --mdns` so Pocket can associate the plugin with the advertised instance.
+Quit and restart OpenCode after changing `tui.json`; OpenCode loads TUI plugins only at startup. Start the TUI with `--port 0`. The plugin registers its loopback server directly with Pocket, so `--mdns` is not required.
 
 When synchronization is active:
 
@@ -149,7 +159,7 @@ After opening the HTTPS Pocket URL in Chrome on Android, use "Add to Home screen
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `OPENCODE_DISCOVERY` | `true` | Discover loopback OpenCode HTTP advertisements over mDNS |
+| `OPENCODE_DISCOVERY` | `true` | Enable mDNS discovery as a plugin-independent fallback |
 | `OPENCODE_URL` | empty | Add a fixed OpenCode server alongside discovered instances |
 | `OPENCODE_USERNAME` | `opencode` | OpenCode Basic auth username |
 | `OPENCODE_PASSWORD` | empty | OpenCode Basic auth password |
