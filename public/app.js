@@ -3,10 +3,12 @@ const app = document.querySelector("#app")
 const DRAFTS_KEY = "opencode-pocket-drafts-v1"
 const BOTTOM_THRESHOLD = 80
 const savedDrafts = loadDrafts()
+const initialRoute = routeFromHash()
 
 const state = {
-  snapshot: { connected: false, sessions: [], questions: [], permissions: [] },
-  routeSessionId: sessionFromHash(),
+  snapshot: { connected: false, instances: [], sessions: [], questions: [], permissions: [] },
+  routeInstanceId: initialRoute.instanceId,
+  routeSessionId: initialRoute.sessionId,
   messages: [],
   loadingMessages: false,
   agents: [],
@@ -61,9 +63,32 @@ function persistDrafts() {
   }
 }
 
-function sessionFromHash() {
-  const match = location.hash.match(/^#\/session\/([^/]+)$/)
-  return match ? decodeURIComponent(match[1]) : ""
+function decodeRoutePart(value) {
+  try { return decodeURIComponent(value) } catch { return "" }
+}
+
+function routeFromHash() {
+  const conversation = location.hash.match(/^#\/instance\/([^/]+)\/session\/([^/]+)$/)
+  if (conversation) return { instanceId: decodeRoutePart(conversation[1]), sessionId: decodeRoutePart(conversation[2]) }
+  const instance = location.hash.match(/^#\/instance\/([^/]+)$/)
+  if (instance) return { instanceId: decodeRoutePart(instance[1]), sessionId: "" }
+  return { instanceId: "", sessionId: "" }
+}
+
+function scopedKey(...parts) {
+  return JSON.stringify(parts)
+}
+
+function conversationKey(instanceId = state.routeInstanceId, sessionId = state.routeSessionId) {
+  return instanceId && sessionId ? scopedKey(instanceId, sessionId) : ""
+}
+
+function routeMatches(instanceId, sessionId = state.routeSessionId) {
+  return state.routeInstanceId === instanceId && state.routeSessionId === sessionId
+}
+
+function sessionApiPath(instanceId, sessionId, suffix) {
+  return `/api/instances/${encodeURIComponent(instanceId)}/sessions/${encodeURIComponent(sessionId)}/${suffix}`
 }
 
 function esc(value = "") {
@@ -92,16 +117,20 @@ function statusFor(session) {
   return { label: type === "busy" ? "working" : type, className: type }
 }
 
-function sessionFor(id) {
-  return state.snapshot.sessions.find((item) => item.id === id)
+function instanceFor(id) {
+  return state.snapshot.instances.find((item) => item.id === id)
 }
 
-function pendingQuestion(id) {
-  return state.snapshot.questions.find((item) => (item.sessionID || item.sessionId) === id)
+function sessionFor(instanceId, sessionId) {
+  return state.snapshot.sessions.find((item) => item.instanceId === instanceId && item.id === sessionId)
 }
 
-function pendingPermission(id) {
-  return state.snapshot.permissions.find((item) => (item.sessionID || item.sessionId) === id)
+function pendingQuestion(instanceId, sessionId) {
+  return state.snapshot.questions.find((item) => item.instanceId === instanceId && (item.sessionID || item.sessionId) === sessionId)
+}
+
+function pendingPermission(instanceId, sessionId) {
+  return state.snapshot.permissions.find((item) => item.instanceId === instanceId && (item.sessionID || item.sessionId) === sessionId)
 }
 
 async function api(path, options = {}) {
@@ -133,16 +162,21 @@ async function loadState() {
 }
 
 async function loadMessages({ quiet = false } = {}) {
-  if (!state.routeSessionId || state.loadingMessages) return
+  const iid = state.routeInstanceId
+  const sid = state.routeSessionId
+  if (!iid || !sid || state.loadingMessages) return
   state.loadingMessages = true
   if (!quiet) render()
   try {
-    state.messages = await api(`/api/sessions/${encodeURIComponent(state.routeSessionId)}/messages?limit=120`)
+    const messages = await api(`${sessionApiPath(iid, sid, "messages")}?limit=120`)
+    if (routeMatches(iid, sid)) state.messages = messages
   } catch (error) {
-    showToast(error.message)
+    if (routeMatches(iid, sid)) showToast(error.message)
   } finally {
-    state.loadingMessages = false
-    render()
+    if (routeMatches(iid, sid)) {
+      state.loadingMessages = false
+      render()
+    }
   }
 }
 
@@ -156,58 +190,64 @@ function agentFromMessages() {
 }
 
 async function loadAgents() {
+  const iid = state.routeInstanceId
   const sid = state.routeSessionId
-  if (!sid) return
+  const key = conversationKey(iid, sid)
+  if (!key) return
   try {
-    const agents = await api(`/api/sessions/${encodeURIComponent(sid)}/agents`)
-    if (state.routeSessionId !== sid) return
+    const agents = await api(sessionApiPath(iid, sid, "agents"))
+    if (!routeMatches(iid, sid)) return
     state.agents = Array.isArray(agents) ? agents : []
-    state.agentSessionId = sid
+    state.agentSessionId = key
     const available = new Set(state.agents.map((agent) => agent.name))
-    const remembered = state.selectedAgents.get(sid)
+    const remembered = state.selectedAgents.get(key)
     const inferred = agentFromMessages()
     const selected = available.has(remembered) ? remembered : available.has(inferred) ? inferred : state.agents[0]?.name
-    if (selected) state.selectedAgents.set(sid, selected)
+    if (selected) state.selectedAgents.set(key, selected)
     state.renderedAgents = ""
     render()
   } catch (error) {
-    if (state.routeSessionId === sid) showToast(error.message)
+    if (routeMatches(iid, sid)) showToast(error.message)
   }
 }
 
 async function loadChanges({ quiet = false } = {}) {
+  const iid = state.routeInstanceId
   const sid = state.routeSessionId
-  if (!sid || state.loadingChangesSession === sid) return
-  state.loadingChangesSession = sid
+  const key = conversationKey(iid, sid)
+  if (!key || state.loadingChangesSession === key) return
+  state.loadingChangesSession = key
   if (!quiet) render()
   try {
-    const changes = await api(`/api/sessions/${encodeURIComponent(sid)}/changes`)
-    if (state.routeSessionId !== sid) return
+    const changes = await api(sessionApiPath(iid, sid, "changes"))
+    if (!routeMatches(iid, sid)) return
     state.changes = Array.isArray(changes) ? changes : []
-    state.changesSessionId = sid
+    state.changesSessionId = key
     state.renderedChanges = ""
   } catch (error) {
-    if (state.routeSessionId === sid) showToast(error.message)
+    if (routeMatches(iid, sid)) showToast(error.message)
   } finally {
-    if (state.loadingChangesSession === sid) state.loadingChangesSession = ""
-    if (state.routeSessionId === sid) render()
+    if (state.loadingChangesSession === key) state.loadingChangesSession = ""
+    if (routeMatches(iid, sid)) render()
   }
 }
 
 async function loadDiff(messageId) {
+  const iid = state.routeInstanceId
   const sid = state.routeSessionId
-  if (!sid || !messageId || state.diffs.has(messageId) || state.loadingDiffs.has(messageId)) return
-  state.loadingDiffs.add(messageId)
-  state.diffErrors.delete(messageId)
+  const key = scopedKey(iid, sid, messageId)
+  if (!iid || !sid || !messageId || state.diffs.has(key) || state.loadingDiffs.has(key)) return
+  state.loadingDiffs.add(key)
+  state.diffErrors.delete(key)
   render()
   try {
-    const diff = await api(`/api/sessions/${encodeURIComponent(sid)}/diff?messageId=${encodeURIComponent(messageId)}`)
-    if (state.routeSessionId === sid) state.diffs.set(messageId, Array.isArray(diff) ? diff : [])
+    const diff = await api(`${sessionApiPath(iid, sid, "diff")}?messageId=${encodeURIComponent(messageId)}`)
+    if (routeMatches(iid, sid)) state.diffs.set(key, Array.isArray(diff) ? diff : [])
   } catch (error) {
-    if (state.routeSessionId === sid) state.diffErrors.set(messageId, error.message)
+    if (routeMatches(iid, sid)) state.diffErrors.set(key, error.message)
   } finally {
-    state.loadingDiffs.delete(messageId)
-    if (state.routeSessionId === sid) render()
+    state.loadingDiffs.delete(key)
+    if (routeMatches(iid, sid)) render()
   }
 }
 
@@ -236,7 +276,8 @@ function durationLabel(time) {
 }
 
 function partKey(message, part, index) {
-  return part.id || part.callID || `${message?.info?.id || message?.id || "message"}:${index}`
+  const id = part.id || part.callID || `${message?.info?.id || message?.id || "message"}:${index}`
+  return scopedKey(state.routeInstanceId, state.routeSessionId, id)
 }
 
 function detailText(value) {
@@ -294,14 +335,15 @@ function renderPatchLines(patch) {
 }
 
 function renderDiffFiles(messageId) {
-  if (state.loadingDiffs.has(messageId)) return `<div class="diff-loading">Loading patch…</div>`
-  if (state.diffErrors.has(messageId)) return `<div class="diff-error">${esc(state.diffErrors.get(messageId))}</div>`
-  if (!state.diffs.has(messageId)) return `<div class="diff-loading">Expand to load patch.</div>`
-  const files = state.diffs.get(messageId)
+  const diffKey = scopedKey(state.routeInstanceId, state.routeSessionId, messageId)
+  if (state.loadingDiffs.has(diffKey)) return `<div class="diff-loading">Loading patch…</div>`
+  if (state.diffErrors.has(diffKey)) return `<div class="diff-error">${esc(state.diffErrors.get(diffKey))}</div>`
+  if (!state.diffs.has(diffKey)) return `<div class="diff-loading">Expand to load patch.</div>`
+  const files = state.diffs.get(diffKey)
   if (!files.length) return `<div class="diff-loading">No diff is available for this turn.</div>`
   return `<div class="diff-files">${files.map((file) => {
     const path = file.file || "Changed file"
-    const key = `diff-file:${messageId}:${path}`
+    const key = scopedKey(state.routeInstanceId, state.routeSessionId, "diff-file", messageId, path)
     const status = { added: "A", deleted: "D", modified: "M" }[file.status] || "M"
     return `<details class="diff-file ${esc(file.status)}" data-part-key="${esc(key)}" ${state.expandedParts.has(key) ? "open" : ""}>
       <summary>
@@ -316,7 +358,7 @@ function renderDiffFiles(messageId) {
 function renderPatchPart(message, part, index) {
   const info = message?.info || message
   const messageId = info?.parentID || ""
-  const key = `patch:${partKey(message, part, index)}`
+  const key = scopedKey(state.routeInstanceId, state.routeSessionId, "patch", partKey(message, part, index))
   const files = [...new Set(Array.isArray(part.files) ? part.files : [])]
   return `<details class="diff-block" data-part-key="${esc(key)}" ${messageId ? `data-diff-message="${esc(messageId)}"` : ""} ${state.expandedParts.has(key) ? "open" : ""}>
     <summary>
@@ -334,8 +376,8 @@ function diffTotals(files) {
 }
 
 function renderChangeTurn(change) {
-  const key = `change-turn:${change.messageId}`
-  const files = state.diffs.get(change.messageId)
+  const key = scopedKey(state.routeInstanceId, state.routeSessionId, "change-turn", change.messageId)
+  const files = state.diffs.get(scopedKey(state.routeInstanceId, state.routeSessionId, change.messageId))
   const totals = diffTotals(files)
   const counts = files ? `<span class="diff-counts"><span>+${totals.additions}</span><span>−${totals.deletions}</span></span>` : ""
   return `<details class="change-turn" data-part-key="${esc(key)}" data-diff-message="${esc(change.messageId)}" ${state.expandedParts.has(key) ? "open" : ""}>
@@ -348,7 +390,7 @@ function renderChangeTurn(change) {
 }
 
 function renderChangesDrawer() {
-  if (state.loadingChangesSession === state.routeSessionId && !state.changes.length) return `<div class="changes-empty">Loading change history…</div>`
+  if (state.loadingChangesSession === conversationKey() && !state.changes.length) return `<div class="changes-empty">Loading change history…</div>`
   if (!state.changes.length) return `<div class="changes-empty">No file changes in this session.</div>`
   return `<div class="change-turns">${[...state.changes].reverse().map(renderChangeTurn).join("")}</div>`
 }
@@ -384,9 +426,9 @@ function isNearBottom() {
 }
 
 function scrollToLatest() {
-  const sessionId = state.routeSessionId
+  const sessionKey = conversationKey()
   requestAnimationFrame(() => {
-    if (state.followMessages && state.routeSessionId === sessionId) {
+    if (state.followMessages && conversationKey() === sessionKey) {
       window.scrollTo(0, document.documentElement.scrollHeight)
     }
   })
@@ -398,14 +440,15 @@ function permissionId(p) { return p?.id || p?.requestID || p?.requestId || p?.pe
 function renderQuestionCard(request) {
   if (!request) return ""
   const rid = questionId(request)
+  const key = scopedKey(request.instanceId, rid)
   const questions = Array.isArray(request.questions) ? request.questions : []
-  if (!state.questionAnswers.has(rid)) state.questionAnswers.set(rid, questions.map(() => []))
-  const answers = state.questionAnswers.get(rid)
+  if (!state.questionAnswers.has(key)) state.questionAnswers.set(key, questions.map(() => []))
+  const answers = state.questionAnswers.get(key)
   for (let index = 0; index < questions.length; index += 1) {
     if (!Array.isArray(answers[index])) answers[index] = []
   }
 
-  return `<section class="attention-card" data-question-id="${esc(rid)}">
+  return `<section class="attention-card" data-question-id="${esc(rid)}" data-question-key="${esc(key)}">
     <div class="attention-title">OpenCode needs your answer</div>
     ${questions.map((q, index) => {
       const selected = answers[index] || []
@@ -447,36 +490,74 @@ function renderPermissionCard(permission) {
   </section>`
 }
 
-function renderList() {
+function projectLabel(instance) {
+  const project = instance?.project
+  if (typeof project === "string") return project
+  return project?.name || project?.worktree || project?.id || instance?.path?.directory || instance?.path?.worktree || ""
+}
+
+function instanceTitle(instance) {
+  return instance?.serviceName || projectLabel(instance) || instance?.source || instance?.id || "Instance"
+}
+
+function instanceMetadata(instance) {
+  const values = [projectLabel(instance), instance?.source].filter(Boolean)
+  return [...new Set(values)].join(" · ")
+}
+
+function renderSessionList(sessions, instanceId) {
+  if (!sessions.length) return `<div class="empty instance-empty">No sessions found for this instance.</div>`
+  return `<div class="list">${sessions.map((session) => {
+    const status = statusFor(session)
+    return `<button class="agent-card" data-open-session="${esc(session.id)}" data-instance-id="${esc(instanceId)}">
+      <div class="agent-row">
+        <div class="agent-main">
+          <div class="agent-title">${esc(titleFor(session))}</div>
+          <div class="agent-subtitle">${esc(session.directory || session.id)} · ${esc(prettyTime(session?.time?.updated || session?.time?.created))}</div>
+        </div>
+        <span class="badge ${status.className}">${esc(status.label)}</span>
+      </div>
+    </button>`
+  }).join("")}</div>`
+}
+
+function renderList(instanceId = "") {
+  const instances = state.snapshot.instances || []
   const sessions = state.snapshot.sessions || []
+  const instance = instanceId ? instanceFor(instanceId) : null
+  if (instanceId && !instance) {
+    return `<div class="shell"><header class="topbar"><button class="icon-button" data-back>←</button><h1>Instance</h1></header><div class="empty">Instance not found.</div></div>`
+  }
+  const content = instance
+    ? `${instance.lastError ? `<div class="banner">${esc(instance.lastError)}</div>` : ""}${renderSessionList(sessions.filter((session) => session.instanceId === instance.id), instance.id)}`
+    : instances.length ? `<div class="instance-groups">${instances.map((item) => {
+      const itemSessions = sessions.filter((session) => session.instanceId === item.id)
+      return `<section class="instance-section">
+        <button class="instance-heading" data-open-instance="${esc(item.id)}">
+          <span><strong>${esc(instanceTitle(item))}</strong><small>${esc(instanceMetadata(item) || item.id)}</small></span>
+          <span class="instance-current"><span class="dot ${item.connected ? "connected" : ""}"></span>${item.connected ? "live" : "offline"} · ${itemSessions.length}</span>
+        </button>
+        ${item.lastError ? `<div class="banner">${esc(item.lastError)}</div>` : ""}
+        ${renderSessionList(itemSessions, item.id)}
+      </section>`
+    }).join("")}</div>` : `<div class="empty">No OpenCode instances found.</div>`
   return `<div class="shell">
     <header class="topbar">
+      ${instance ? `<button class="icon-button" data-back aria-label="Back">←</button>` : ""}
       <div>
-        <h1>OpenCode Pocket</h1>
-        <div class="connection"><span class="dot ${state.snapshot.connected ? "connected" : ""}"></span>${state.snapshot.connected ? "live" : "reconnecting"}</div>
+        <h1>${esc(instance ? instanceTitle(instance) : "OpenCode Pocket")}</h1>
+        <div class="connection"><span class="dot ${(instance ? instance.connected : state.snapshot.connected) ? "connected" : ""}"></span>${instance ? esc(instanceMetadata(instance) || (instance.connected ? "live" : "offline")) : state.snapshot.connected ? "live" : "reconnecting"}</div>
       </div>
       <button class="icon-button" data-notifications title="Enable notifications">🔔</button>
       <button class="icon-button" data-refresh title="Refresh">↻</button>
     </header>
-    ${state.snapshot.lastError ? `<div class="banner">${esc(state.snapshot.lastError)}</div>` : ""}
-    ${sessions.length ? `<div class="list">${sessions.map((session) => {
-      const status = statusFor(session)
-      return `<button class="agent-card" data-open-session="${esc(session.id)}">
-        <div class="agent-row">
-          <div class="agent-main">
-            <div class="agent-title">${esc(titleFor(session))}</div>
-            <div class="agent-subtitle">${esc(session.directory || session.id)} · ${esc(prettyTime(session?.time?.updated || session?.time?.created))}</div>
-          </div>
-          <span class="badge ${status.className}">${esc(status.label)}</span>
-        </div>
-      </button>`
-    }).join("")}</div>` : `<div class="empty">No OpenCode sessions found.<br><br>Start or create a session on the configured OpenCode server.</div>`}
+    ${content}
     ${state.toast ? `<div class="toast">${esc(state.toast)}</div>` : ""}
   </div>`
 }
 
 function renderConversationShell() {
-  const draft = state.messageDrafts.get(state.routeSessionId) || ""
+  const draft = state.messageDrafts.get(conversationKey()) || ""
   return `<div class="shell conversation">
     <header class="topbar">
       <button class="icon-button" data-back aria-label="Back">←</button>
@@ -534,7 +615,8 @@ function updateAgentSelector() {
   const select = app.querySelector("[data-agent-select]")
   const cycle = app.querySelector("[data-cycle-agent]")
   if (!select || !cycle) return
-  const agents = state.agentSessionId === state.routeSessionId ? state.agents : []
+  const sessionKey = conversationKey()
+  const agents = state.agentSessionId === sessionKey ? state.agents : []
   const key = JSON.stringify(agents)
   if (state.renderedAgents !== key) {
     select.innerHTML = agents.length
@@ -542,13 +624,13 @@ function updateAgentSelector() {
       : `<option value="">Loading modes…</option>`
     state.renderedAgents = key
   }
-  select.disabled = agents.length === 0 || state.switchingAgentSession === state.routeSessionId
-  const selected = state.selectedAgents.get(state.routeSessionId)
+  select.disabled = agents.length === 0 || state.switchingAgentSession === sessionKey
+  const selected = state.selectedAgents.get(sessionKey)
   if (selected && agents.some((agent) => agent.name === selected)) select.value = selected
   const currentIndex = agents.findIndex((agent) => agent.name === selected)
   const next = agents.length ? agents[(currentIndex + 1) % agents.length] : null
   cycle.hidden = agents.length < 2
-  cycle.disabled = state.switchingAgentSession === state.routeSessionId
+  cycle.disabled = state.switchingAgentSession === sessionKey
   if (next) {
     cycle.setAttribute("aria-label", `Switch to ${next.name} mode`)
     cycle.title = `Switch to ${next.name}`
@@ -556,24 +638,26 @@ function updateAgentSelector() {
 }
 
 async function switchAgent(agent) {
+  const iid = state.routeInstanceId
   const sid = state.routeSessionId
-  if (!agent || state.switchingAgentSession === sid) return
-  const previous = state.selectedAgents.get(sid)
-  state.selectedAgents.set(sid, agent)
-  state.switchingAgentSession = sid
+  const key = conversationKey(iid, sid)
+  if (!agent || !key || state.switchingAgentSession === key) return
+  const previous = state.selectedAgents.get(key)
+  state.selectedAgents.set(key, agent)
+  state.switchingAgentSession = key
   updateAgentSelector()
   try {
-    await api(`/api/sessions/${encodeURIComponent(sid)}/agent`, {
+    await api(sessionApiPath(iid, sid, "agent"), {
       method: "POST",
       body: JSON.stringify({ agent }),
     })
   } catch (error) {
-    if (previous) state.selectedAgents.set(sid, previous)
-    else state.selectedAgents.delete(sid)
+    if (previous) state.selectedAgents.set(key, previous)
+    else state.selectedAgents.delete(key)
     showToast(error.message)
   } finally {
-    if (state.switchingAgentSession === sid) state.switchingAgentSession = ""
-    if (state.routeSessionId === sid) updateAgentSelector()
+    if (state.switchingAgentSession === key) state.switchingAgentSession = ""
+    if (routeMatches(iid, sid)) updateAgentSelector()
   }
 }
 
@@ -581,9 +665,9 @@ function updateAttention(force = false) {
   const slot = app.querySelector("[data-attention]")
   const sheet = app.querySelector("[data-attention-sheet]")
   if (!slot || !sheet) return
-  const question = pendingQuestion(state.routeSessionId)
-  const permission = pendingPermission(state.routeSessionId)
-  const requestKey = `${questionId(question)}:${permissionId(permission)}`
+  const question = pendingQuestion(state.routeInstanceId, state.routeSessionId)
+  const permission = pendingPermission(state.routeInstanceId, state.routeSessionId)
+  const requestKey = scopedKey(state.routeInstanceId, questionId(question), permissionId(permission))
   const key = JSON.stringify([question || null, permission || null])
 
   if (!question && !permission) {
@@ -624,9 +708,10 @@ function updateChangesView() {
   const overlay = app.querySelector("[data-changes-overlay]")
   const content = app.querySelector("[data-changes-content]")
   if (!button || !overlay || !content) return
-  const changes = state.changesSessionId === state.routeSessionId ? state.changes : []
+  const sessionKey = conversationKey()
+  const changes = state.changesSessionId === sessionKey ? state.changes : []
   const uniqueFiles = new Set(changes.flatMap((change) => change.files || []))
-  button.hidden = changes.length === 0 && state.loadingChangesSession !== state.routeSessionId
+  button.hidden = changes.length === 0 && state.loadingChangesSession !== sessionKey
   button.querySelector("[data-changes-count]").textContent = changes.length || ""
   button.setAttribute("aria-label", `Open ${changes.length} session change ${changes.length === 1 ? "turn" : "turns"}`)
   overlay.hidden = !state.changesOpen
@@ -639,9 +724,10 @@ function updateChangesView() {
 }
 
 function updateConversation(session) {
+  const instance = instanceFor(state.routeInstanceId)
   const status = statusFor(session)
   app.querySelector("[data-session-title]").textContent = titleFor(session)
-  app.querySelector("[data-session-meta]").textContent = session.directory || session.id
+  app.querySelector("[data-session-meta]").textContent = [instanceTitle(instance), session.directory || session.id].filter(Boolean).join(" · ")
   const badge = app.querySelector("[data-session-status]")
   badge.textContent = status.label
   badge.className = `badge ${status.className}`
@@ -670,14 +756,14 @@ function updateConversation(session) {
 function render() {
   if (!state.routeSessionId) {
     document.body.classList.remove("changes-open")
-    state.viewKey = "list"
-    app.innerHTML = renderList()
+    state.viewKey = `list:${state.routeInstanceId}`
+    app.innerHTML = renderList(state.routeInstanceId)
     return
   }
 
-  const session = sessionFor(state.routeSessionId)
+  const session = sessionFor(state.routeInstanceId, state.routeSessionId)
   if (!session) {
-    const key = `missing:${state.routeSessionId}`
+    const key = scopedKey("missing", state.routeInstanceId, state.routeSessionId)
     if (state.viewKey !== key) {
       app.innerHTML = `<div class="shell"><header class="topbar"><button class="icon-button" data-back>←</button><h1>Session</h1></header><div class="empty">Session not found.</div></div>`
       state.viewKey = key
@@ -685,7 +771,7 @@ function render() {
     return
   }
 
-  const key = `conversation:${state.routeSessionId}`
+  const key = scopedKey("conversation", state.routeInstanceId, state.routeSessionId)
   if (state.viewKey !== key) {
     app.innerHTML = renderConversationShell()
     state.viewKey = key
@@ -701,8 +787,8 @@ function render() {
 }
 
 function selectedAnswersFromCard(card) {
-  const rid = card.dataset.questionId
-  const answers = state.questionAnswers.get(rid) || []
+  const key = card.dataset.questionKey
+  const answers = state.questionAnswers.get(key) || []
   card.querySelectorAll("[data-question-index]").forEach((group) => {
     const index = Number(group.dataset.questionIndex)
     const custom = group.querySelector("[data-custom-answer]")?.value.trim()
@@ -711,7 +797,7 @@ function selectedAnswersFromCard(card) {
       answers[index] = [...(answers[index] || []).filter((x) => options.includes(x)), custom]
     }
   })
-  state.questionAnswers.set(rid, answers)
+  state.questionAnswers.set(key, answers)
   persistDrafts()
   return answers
 }
@@ -720,7 +806,7 @@ function captureComposerSelection() {
   const textarea = app.querySelector("[data-composer] textarea")
   if (!textarea || document.activeElement !== textarea) return false
   state.composerSelection = {
-    sessionId: state.routeSessionId,
+    sessionKey: conversationKey(),
     start: textarea.selectionStart,
     end: textarea.selectionEnd,
     direction: textarea.selectionDirection,
@@ -731,7 +817,7 @@ function captureComposerSelection() {
 function restoreComposerFocus(reveal = false) {
   const selection = state.composerSelection
   state.composerSelection = null
-  if (!selection || selection.sessionId !== state.routeSessionId) return
+  if (!selection || selection.sessionKey !== conversationKey()) return
   const textarea = app.querySelector("[data-composer] textarea")
   if (!textarea) return
   textarea.focus({ preventScroll: !reveal })
@@ -758,8 +844,9 @@ app.addEventListener("pointerdown", (event) => {
 app.addEventListener("input", (event) => {
   const input = event.target
   if (input.matches("[data-composer] textarea")) {
-    if (input.value) state.messageDrafts.set(state.routeSessionId, input.value)
-    else state.messageDrafts.delete(state.routeSessionId)
+    const key = conversationKey()
+    if (input.value) state.messageDrafts.set(key, input.value)
+    else state.messageDrafts.delete(key)
     persistDrafts()
     return
   }
@@ -768,13 +855,13 @@ app.addEventListener("input", (event) => {
     const card = input.closest("[data-question-id]")
     const group = input.closest("[data-question-index]")
     if (!card || !group) return
-    const rid = card.dataset.questionId
+    const key = card.dataset.questionKey
     const index = Number(group.dataset.questionIndex)
-    const answers = state.questionAnswers.get(rid) || []
+    const answers = state.questionAnswers.get(key) || []
     const options = [...group.querySelectorAll("[data-answer-option]")].map((button) => button.dataset.answerOption)
     const selected = (answers[index] || []).filter((answer) => options.includes(answer))
     answers[index] = input.value ? [...selected, input.value] : selected
-    state.questionAnswers.set(rid, answers)
+    state.questionAnswers.set(key, answers)
     persistDrafts()
   }
 })
@@ -817,11 +904,15 @@ app.addEventListener("click", async (event) => {
   if (!target) return
 
   if (target.dataset.openSession) {
-    location.hash = `#/session/${encodeURIComponent(target.dataset.openSession)}`
+    location.hash = `#/instance/${encodeURIComponent(target.dataset.instanceId)}/session/${encodeURIComponent(target.dataset.openSession)}`
+    return
+  }
+  if (target.dataset.openInstance) {
+    location.hash = `#/instance/${encodeURIComponent(target.dataset.openInstance)}`
     return
   }
   if (target.hasAttribute("data-back")) {
-    location.hash = "#/"
+    location.hash = state.routeSessionId ? `#/instance/${encodeURIComponent(state.routeInstanceId)}` : "#/"
     return
   }
   if (target.hasAttribute("data-refresh")) {
@@ -836,7 +927,7 @@ app.addEventListener("click", async (event) => {
   }
   if (target.hasAttribute("data-abort")) {
     if (!confirm("Abort this OpenCode session?")) return
-    try { await api(`/api/sessions/${encodeURIComponent(state.routeSessionId)}/abort`, { method: "POST" }); showToast("Abort sent") } catch (error) { showToast(error.message) }
+    try { await api(sessionApiPath(state.routeInstanceId, state.routeSessionId, "abort"), { method: "POST" }); showToast("Abort sent") } catch (error) { showToast(error.message) }
     return
   }
   if (target.hasAttribute("data-open-changes")) {
@@ -851,7 +942,7 @@ app.addEventListener("click", async (event) => {
   if (target.hasAttribute("data-stop")) {
     target.disabled = true
     try {
-      await api(`/api/sessions/${encodeURIComponent(state.routeSessionId)}/abort`, { method: "POST" })
+      await api(sessionApiPath(state.routeInstanceId, state.routeSessionId, "abort"), { method: "POST" })
       showToast("Stop sent")
     } catch (error) {
       showToast(error.message)
@@ -861,8 +952,9 @@ app.addEventListener("click", async (event) => {
     return
   }
   if (target.hasAttribute("data-cycle-agent")) {
-    const agents = state.agentSessionId === state.routeSessionId ? state.agents : []
-    const selected = state.selectedAgents.get(state.routeSessionId)
+    const key = conversationKey()
+    const agents = state.agentSessionId === key ? state.agents : []
+    const selected = state.selectedAgents.get(key)
     const currentIndex = agents.findIndex((agent) => agent.name === selected)
     const next = agents.length ? agents[(currentIndex + 1) % agents.length] : null
     if (next) switchAgent(next.name)
@@ -879,9 +971,9 @@ app.addEventListener("click", async (event) => {
   if (option) {
     const card = option.closest("[data-question-id]")
     const group = option.closest("[data-question-index]")
-    const rid = card.dataset.questionId
+    const key = card.dataset.questionKey
     const index = Number(group.dataset.questionIndex)
-    const answers = state.questionAnswers.get(rid)
+    const answers = state.questionAnswers.get(key)
     const selected = answers[index] || []
     const label = option.dataset.answerOption
     if (option.dataset.multiple === "true") {
@@ -898,11 +990,12 @@ app.addEventListener("click", async (event) => {
   if (target.hasAttribute("data-submit-question")) {
     const card = target.closest("[data-question-id]")
     const rid = card.dataset.questionId
+    const key = card.dataset.questionKey
     const answers = selectedAnswersFromCard(card)
     if (answers.some((answer) => !answer?.length)) return showToast("Answer each question first")
     try {
-      await api(`/api/questions/${encodeURIComponent(rid)}/reply`, { method: "POST", body: JSON.stringify({ answers }) })
-      state.questionAnswers.delete(rid)
+      await api(`/api/instances/${encodeURIComponent(state.routeInstanceId)}/questions/${encodeURIComponent(rid)}/reply`, { method: "POST", body: JSON.stringify({ answers }) })
+      state.questionAnswers.delete(key)
       persistDrafts()
       showToast("Answer sent")
     } catch (error) { showToast(error.message) }
@@ -910,10 +1003,11 @@ app.addEventListener("click", async (event) => {
   }
 
   if (target.hasAttribute("data-reject-question")) {
-    const rid = target.closest("[data-question-id]").dataset.questionId
+    const card = target.closest("[data-question-id]")
+    const rid = card.dataset.questionId
     try {
-      await api(`/api/questions/${encodeURIComponent(rid)}/reject`, { method: "POST" })
-      state.questionAnswers.delete(rid)
+      await api(`/api/instances/${encodeURIComponent(state.routeInstanceId)}/questions/${encodeURIComponent(rid)}/reject`, { method: "POST" })
+      state.questionAnswers.delete(card.dataset.questionKey)
       persistDrafts()
       showToast("Question rejected")
     } catch (error) { showToast(error.message) }
@@ -921,10 +1015,10 @@ app.addEventListener("click", async (event) => {
   }
 
   if (target.dataset.permissionResponse) {
-    const permission = pendingPermission(state.routeSessionId)
+    const permission = pendingPermission(state.routeInstanceId, state.routeSessionId)
     if (!permission) return
     try {
-      await api(`/api/permissions/${encodeURIComponent(state.routeSessionId)}/${encodeURIComponent(permissionId(permission))}/reply`, {
+      await api(`/api/instances/${encodeURIComponent(state.routeInstanceId)}/permissions/${encodeURIComponent(state.routeSessionId)}/${encodeURIComponent(permissionId(permission))}/reply`, {
         method: "POST",
         body: JSON.stringify({ response: target.dataset.permissionResponse }),
       })
@@ -941,13 +1035,15 @@ app.addEventListener("submit", async (event) => {
   const text = textarea.value.trim()
   if (!text) return
   const sid = state.routeSessionId
-  const agent = state.selectedAgents.get(sid) || ""
+  const iid = state.routeInstanceId
+  const key = conversationKey(iid, sid)
+  const agent = state.selectedAgents.get(key) || ""
   try {
-    await api(`/api/sessions/${encodeURIComponent(sid)}/messages`, { method: "POST", body: JSON.stringify({ text, agent }) })
-    state.messageDrafts.delete(sid)
+    await api(sessionApiPath(iid, sid, "messages"), { method: "POST", body: JSON.stringify({ text, agent }) })
+    state.messageDrafts.delete(key)
     persistDrafts()
     textarea.value = ""
-    scheduleMessagesRefresh()
+    if (routeMatches(iid, sid)) scheduleMessagesRefresh()
   } catch (error) {
     showToast(error.message)
   }
@@ -955,8 +1051,13 @@ app.addEventListener("submit", async (event) => {
 
 window.addEventListener("hashchange", () => {
   document.body.classList.remove("changes-open")
-  state.routeSessionId = sessionFromHash()
+  clearTimeout(state.refreshTimer)
+  clearTimeout(state.changesTimer)
+  const route = routeFromHash()
+  state.routeInstanceId = route.instanceId
+  state.routeSessionId = route.sessionId
   state.messages = []
+  state.loadingMessages = false
   state.agents = []
   state.agentSessionId = ""
   state.changes = []
@@ -977,10 +1078,11 @@ window.addEventListener("scroll", () => {
 function maybeNotify(event) {
   if (!("Notification" in window) || Notification.permission !== "granted") return
   if (document.visibilityState === "visible") return
-  const session = sessionFor(event.sessionId)
+  const session = sessionFor(event.instanceId, event.sessionId)
   const title = titleFor(session)
-  if (event.type === "question.asked") new Notification(`${title} needs an answer`, { body: event.request?.questions?.[0]?.question || "OpenCode asked a question", tag: event.requestId })
-  if (event.type === "permission.asked") new Notification(`${title} needs permission`, { body: event.request?.title || event.request?.type || "Permission requested", tag: event.requestId })
+  const tag = scopedKey(event.instanceId, event.requestId)
+  if (event.type === "question.asked") new Notification(`${title} needs an answer`, { body: event.request?.questions?.[0]?.question || "OpenCode asked a question", tag })
+  if (event.type === "permission.asked") new Notification(`${title} needs permission`, { body: event.request?.title || event.request?.type || "Permission requested", tag })
 }
 
 let devServerId = ""
@@ -998,17 +1100,17 @@ source.addEventListener("state", (event) => {
 source.addEventListener("agent-event", (message) => {
   const event = JSON.parse(message.data)
   if ((event.type === "question.replied" || event.type === "question.rejected") && event.requestId) {
-    state.questionAnswers.delete(event.requestId)
+    state.questionAnswers.delete(scopedKey(event.instanceId, event.requestId))
     persistDrafts()
   }
   const switchedAgent = event.type === "session.next.agent.switched" ? event.data?.agent : event.message?.info?.agent
-  if (event.sessionId && switchedAgent) {
-    state.selectedAgents.set(event.sessionId, switchedAgent)
-    if (event.sessionId === state.routeSessionId) render()
+  if (event.instanceId && event.sessionId && switchedAgent) {
+    state.selectedAgents.set(conversationKey(event.instanceId, event.sessionId), switchedAgent)
+    if (routeMatches(event.instanceId, event.sessionId)) render()
   }
   maybeNotify(event)
-  if (event.type === "message.part" && event.part?.type === "patch" && event.sessionId === state.routeSessionId) scheduleChangesRefresh()
-  if (state.routeSessionId && event.sessionId === state.routeSessionId && ["message.part", "message.updated", "session.status"].includes(event.type)) scheduleMessagesRefresh()
+  if (event.type === "message.part" && event.part?.type === "patch" && routeMatches(event.instanceId, event.sessionId)) scheduleChangesRefresh()
+  if (state.routeSessionId && routeMatches(event.instanceId, event.sessionId) && ["message.part", "message.updated", "session.status"].includes(event.type)) scheduleMessagesRefresh()
 })
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {})

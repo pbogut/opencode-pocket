@@ -123,7 +123,7 @@ export class OpenCodeBridge extends EventEmitter {
       ...(options.body ? { "Content-Type": "application/json" } : {}),
       ...(options.headers || {}),
     }
-    const response = await fetch(url, { ...options, headers })
+    const response = await fetch(url, { signal: options.signal || AbortSignal.timeout(10_000), ...options, headers })
     if (!response.ok) {
       const detail = await response.text().catch(() => "")
       throw new Error(`OpenCode ${options.method || "GET"} ${path} failed: ${response.status} ${detail}`.trim())
@@ -163,9 +163,8 @@ export class OpenCodeBridge extends EventEmitter {
       this.request(statusPath).catch(() => ({})),
     ])
 
-    for (const item of Array.isArray(sessions) ? sessions : []) {
-      if (item?.id) this.sessions.set(item.id, item)
-    }
+    this.sessions.clear()
+    for (const item of Array.isArray(sessions) ? sessions : []) if (item?.id) this.sessions.set(item.id, item)
     this.statuses.clear()
     for (const [sid, status] of Object.entries(statuses || {})) this.statuses.set(sid, status)
 
@@ -367,6 +366,21 @@ export class OpenCodeBridge extends EventEmitter {
         color: agent.color || "",
       }))
       .filter((agent) => agent.name)
+  }
+
+  async describe() {
+    const [path, project] = await Promise.all([
+      this.request("/path").catch(() => null),
+      this.request("/project/current").catch(() => null),
+    ])
+    return { path, project }
+  }
+
+  async selectSession(sid) {
+    return this.request(this.pathForSession("/tui/select-session", sid), {
+      method: "POST",
+      body: JSON.stringify({ sessionID: sid }),
+    })
   }
 
   async sendMessage(sid, text, agent = "") {

@@ -4,10 +4,10 @@ import { stat } from "node:fs/promises"
 import { extname, join, normalize } from "node:path"
 import { fileURLToPath } from "node:url"
 import { loadConfig } from "./config.mjs"
-import { OpenCodeBridge } from "./opencode.mjs"
+import { InstanceManager } from "./instances.mjs"
 
 const config = loadConfig()
-const bridge = new OpenCodeBridge(config)
+const manager = new InstanceManager(config)
 const publicDir = fileURLToPath(new URL("../public/", import.meta.url))
 const sseClients = new Set()
 const devMode = process.argv.includes("--dev")
@@ -50,8 +50,8 @@ if (devMode) {
   publicWatcher.on("error", (error) => console.error("Live reload watcher failed", error))
 }
 
-bridge.on("state", (state) => broadcast("state", state))
-bridge.on("event", (event) => broadcast("agent-event", event))
+manager.on("state", (state) => broadcast("state", state))
+manager.on("event", (event) => broadcast("agent-event", event))
 
 function mime(path) {
   return {
@@ -91,14 +91,14 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === "GET" && path === "/api/health") {
-      return json(res, 200, { hub: { ok: true }, opencode: await bridge.health(), state: bridge.snapshot() })
+      return json(res, 200, { hub: { ok: true }, opencode: await manager.health(), state: manager.snapshot() })
     }
     if (req.method === "GET" && path === "/api/state") {
-      return json(res, 200, bridge.snapshot())
+      return json(res, 200, manager.snapshot())
     }
     if (req.method === "POST" && path === "/api/refresh") {
-      await bridge.refresh()
-      return json(res, 200, bridge.snapshot())
+      await manager.refresh()
+      return json(res, 200, manager.snapshot())
     }
     if (req.method === "GET" && path === "/api/events") {
       res.writeHead(200, {
@@ -107,7 +107,7 @@ const server = http.createServer(async (req, res) => {
         Connection: "keep-alive",
         "X-Accel-Buffering": "no",
       })
-      res.write(`event: state\ndata: ${JSON.stringify(bridge.snapshot())}\n\n`)
+      res.write(`event: state\ndata: ${JSON.stringify(manager.snapshot())}\n\n`)
       if (devMode) res.write(`event: dev-server\ndata: ${JSON.stringify({ id: devServerId })}\n\n`)
       const timer = setInterval(() => res.write(": heartbeat\n\n"), 15_000)
       sseClients.add(res)
@@ -118,13 +118,15 @@ const server = http.createServer(async (req, res) => {
       return
     }
 
-    let match = path.match(/^\/api\/sessions\/([^/]+)\/messages$/)
+    let match = path.match(/^\/api\/instances\/([^/]+)\/sessions\/([^/]+)\/messages$/)
     if (match && req.method === "GET") {
-      const sid = decodeURIComponent(match[1])
+      const bridge = manager.bridge(decodeURIComponent(match[1]))
+      const sid = decodeURIComponent(match[2])
       return json(res, 200, await bridge.listMessages(sid, Number(url.searchParams.get("limit") || 100)))
     }
     if (match && req.method === "POST") {
-      const sid = decodeURIComponent(match[1])
+      const bridge = manager.bridge(decodeURIComponent(match[1]))
+      const sid = decodeURIComponent(match[2])
       const input = await bodyJson(req)
       const text = String(input.text || "").trim()
       if (!text) return json(res, 400, { error: "Message text is required" })
@@ -133,56 +135,62 @@ const server = http.createServer(async (req, res) => {
       return json(res, 202, { ok: true })
     }
 
-    match = path.match(/^\/api\/sessions\/([^/]+)\/changes$/)
+    match = path.match(/^\/api\/instances\/([^/]+)\/sessions\/([^/]+)\/changes$/)
     if (match && req.method === "GET") {
-      return json(res, 200, await bridge.listChangeTurns(decodeURIComponent(match[1])))
+      return json(res, 200, await manager.bridge(decodeURIComponent(match[1])).listChangeTurns(decodeURIComponent(match[2])))
     }
 
-    match = path.match(/^\/api\/sessions\/([^/]+)\/diff$/)
+    match = path.match(/^\/api\/instances\/([^/]+)\/sessions\/([^/]+)\/diff$/)
     if (match && req.method === "GET") {
       const messageId = String(url.searchParams.get("messageId") || "").trim()
       if (!messageId) return json(res, 400, { error: "messageId is required" })
-      return json(res, 200, await bridge.getMessageDiff(decodeURIComponent(match[1]), messageId))
+      return json(res, 200, await manager.bridge(decodeURIComponent(match[1])).getMessageDiff(decodeURIComponent(match[2]), messageId))
     }
 
-    match = path.match(/^\/api\/sessions\/([^/]+)\/agents$/)
+    match = path.match(/^\/api\/instances\/([^/]+)\/sessions\/([^/]+)\/agents$/)
     if (match && req.method === "GET") {
-      return json(res, 200, await bridge.listAgents(decodeURIComponent(match[1])))
+      return json(res, 200, await manager.bridge(decodeURIComponent(match[1])).listAgents(decodeURIComponent(match[2])))
     }
 
-    match = path.match(/^\/api\/sessions\/([^/]+)\/agent$/)
+    match = path.match(/^\/api\/instances\/([^/]+)\/sessions\/([^/]+)\/agent$/)
     if (match && req.method === "POST") {
       const input = await bodyJson(req)
       const agent = String(input.agent || "").trim()
       if (!agent) return json(res, 400, { error: "Agent is required" })
-      await bridge.switchAgent(decodeURIComponent(match[1]), agent)
+      await manager.bridge(decodeURIComponent(match[1])).switchAgent(decodeURIComponent(match[2]), agent)
       return json(res, 200, { ok: true })
     }
 
-    match = path.match(/^\/api\/sessions\/([^/]+)\/abort$/)
+    match = path.match(/^\/api\/instances\/([^/]+)\/sessions\/([^/]+)\/abort$/)
     if (match && req.method === "POST") {
-      await bridge.abortSession(decodeURIComponent(match[1]))
+      await manager.bridge(decodeURIComponent(match[1])).abortSession(decodeURIComponent(match[2]))
       return json(res, 200, { ok: true })
     }
 
-    match = path.match(/^\/api\/questions\/([^/]+)\/reply$/)
+    match = path.match(/^\/api\/instances\/([^/]+)\/sessions\/([^/]+)\/select$/)
+    if (match && req.method === "POST") {
+      await manager.bridge(decodeURIComponent(match[1])).selectSession(decodeURIComponent(match[2]))
+      return json(res, 200, { ok: true })
+    }
+
+    match = path.match(/^\/api\/instances\/([^/]+)\/questions\/([^/]+)\/reply$/)
     if (match && req.method === "POST") {
       const input = await bodyJson(req)
       if (!Array.isArray(input.answers)) return json(res, 400, { error: "answers must be an array" })
-      await bridge.replyQuestion(decodeURIComponent(match[1]), input.answers)
+      await manager.bridge(decodeURIComponent(match[1])).replyQuestion(decodeURIComponent(match[2]), input.answers)
       return json(res, 200, { ok: true })
     }
 
-    match = path.match(/^\/api\/questions\/([^/]+)\/reject$/)
+    match = path.match(/^\/api\/instances\/([^/]+)\/questions\/([^/]+)\/reject$/)
     if (match && req.method === "POST") {
-      await bridge.rejectQuestion(decodeURIComponent(match[1]))
+      await manager.bridge(decodeURIComponent(match[1])).rejectQuestion(decodeURIComponent(match[2]))
       return json(res, 200, { ok: true })
     }
 
-    match = path.match(/^\/api\/permissions\/([^/]+)\/([^/]+)\/reply$/)
+    match = path.match(/^\/api\/instances\/([^/]+)\/permissions\/([^/]+)\/([^/]+)\/reply$/)
     if (match && req.method === "POST") {
       const input = await bodyJson(req)
-      await bridge.replyPermission(decodeURIComponent(match[1]), decodeURIComponent(match[2]), input.response)
+      await manager.bridge(decodeURIComponent(match[1])).replyPermission(decodeURIComponent(match[2]), decodeURIComponent(match[3]), input.response)
       return json(res, 200, { ok: true })
     }
 
@@ -196,17 +204,17 @@ const server = http.createServer(async (req, res) => {
   }
 })
 
-await bridge.start()
+await manager.start()
 server.listen(config.port, config.host, () => {
   console.log(`OpenCode Pocket: http://${config.host}:${config.port}`)
-  console.log(`OpenCode server: ${config.openCodeUrl}`)
+  if (config.openCodeUrl) console.log(`OpenCode server: ${config.openCodeUrl}`)
   if (devMode) console.log("Live reload: enabled")
   if (!config.openCodePassword) console.log("OpenCode auth: none configured in Pocket")
 })
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
-    bridge.stop()
+    manager.stop()
     clearTimeout(reloadTimer)
     publicWatcher?.close()
     server.close(() => process.exit(0))
