@@ -199,7 +199,7 @@ body.sessions-open { overflow: hidden; }
 .custom-answer { width: 100%; border: 1px solid var(--line); background: #0f1217; color: var(--text); border-radius: 12px; padding: 10px; margin-top: 8px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .permission-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #0f1217; border-radius: 10px; padding: 10px; white-space: pre-wrap; word-break: break-word; font-size: 12px; color: #d9dce2; }
-.composer-wrap { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 18%); }
+.composer-wrap { position: fixed; left: 0; right: 0; bottom: var(--keyboard-inset, 0px); z-index: 20; padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 18%); }
 .attention-sheet { max-width: 732px; margin: 0 auto 8px; overflow: hidden; border: 1px solid #6c5828; border-radius: 18px; background: #211c12; box-shadow: 0 -14px 36px rgb(0 0 0 / .35); }
 .attention-sheet[hidden] { display: none; }
 .attention-sheet-toggle { width: 100%; min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 0; background: #2a2415; padding: 10px 14px; text-align: left; cursor: pointer; }
@@ -225,12 +225,17 @@ body.sessions-open { overflow: hidden; }
 .composer-actions { display: flex; gap: 8px; align-items: center; }
 .composer .send-button { display: grid; width: 42px; height: 42px; padding: 0; place-items: center; }
 .send-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transform: translate(-1px, 1px); }
+.composer .dictate-button { display: grid; width: 42px; height: 42px; padding: 0; place-items: center; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); }
+.composer .dictate-button[hidden] { display: none; }
+.dictate-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.composer .dictate-button.recording { border-color: #6b353b; background: #2b171a; color: var(--danger); animation: dictate-pulse 1.2s ease-in-out infinite alternate; }
 .composer .stop-button { position: relative; display: grid; width: 42px; height: 42px; padding: 0; place-items: center; overflow: hidden; border: 1px solid #694046; background: #28191c; color: var(--danger); }
 .composer .stop-button[hidden] { display: none; }
 .activity-ring { position: absolute; width: 24px; height: 24px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: activity-spin .9s linear infinite; }
 .stop-square { width: 9px; height: 9px; border-radius: 2px; background: currentColor; }
 .stop-button.retry .activity-ring { animation-duration: 1.5s; }
 @keyframes activity-spin { to { transform: rotate(360deg); } }
+@keyframes dictate-pulse { to { box-shadow: 0 0 0 4px rgb(255 138 138 / .12); } }
 .meta { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; margin-bottom: 6px; white-space: nowrap; }
 .meta-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tui-sync-status { flex: none; border-width: 1px; border-style: solid; border-radius: 999px; padding: 2px 6px; font-size: 10px; }
@@ -241,4 +246,5 @@ body.sessions-open { overflow: hidden; }
   .thought-line.thinking::before { animation: none; }
   .thought-block > summary::before, .tool-block > summary::before { transition: none; }
   .diff-block > summary::before, .diff-file > summary::before, .change-turn > summary::before { transition: none; }
+  .composer .dictate-button.recording { animation: none; }
 }

@@ -714,6 +714,9 @@ function renderConversationShell() {
           <textarea name="message" rows="1" placeholder="Message OpenCode…" autocomplete="off" aria-keyshortcuts="Enter" title="Enter to send, Shift+Enter for a new line">${esc(draft)}</textarea>
         </div>
         <div class="composer-actions">
+          <button type="button" class="dictate-button" data-dictate hidden aria-label="Start dictation" aria-pressed="false" title="Start dictation">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"></path></svg>
+          </button>
           <button type="button" class="stop-button" data-stop hidden aria-label="Stop current request" title="Stop current request">
             <span class="activity-ring" aria-hidden="true"></span>
             <span class="stop-square" aria-hidden="true"></span>
@@ -935,6 +938,8 @@ function updateConversation(session) {
   stop.classList.toggle("retry", activity === "retry")
   stop.setAttribute("aria-label", activity === "retry" ? "Agent is retrying. Stop current request" : "Agent is working. Stop current request")
   stop.title = activity === "retry" ? "Agent is retrying. Stop current request" : "Agent is working. Stop current request"
+  updateDictationButton()
+  resizeComposerTextarea()
   updateAgentSelector()
   updateChangesView()
   updateSessionsView()
@@ -1015,6 +1020,27 @@ function captureComposerSelection() {
   return true
 }
 
+function resizeComposerTextarea(textarea = app.querySelector("[data-composer] textarea")) {
+  if (!textarea) return
+  textarea.style.height = "auto"
+  textarea.style.height = `${Math.min(textarea.scrollHeight, 150)}px`
+  textarea.scrollTop = textarea.scrollHeight
+}
+
+function updateKeyboardInset() {
+  const viewport = window.visualViewport
+  const inset = viewport ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop) : 0
+  document.documentElement.style.setProperty("--keyboard-inset", `${Math.round(inset)}px`)
+}
+
+function revealComposer(textarea) {
+  if (!textarea?.isConnected) return
+  resizeComposerTextarea(textarea)
+  updateKeyboardInset()
+  window.scrollTo(0, document.documentElement.scrollHeight)
+  textarea.scrollIntoView({ block: "nearest" })
+}
+
 function restoreComposerFocus(reveal = false) {
   const selection = state.composerSelection
   state.composerSelection = null
@@ -1023,16 +1049,133 @@ function restoreComposerFocus(reveal = false) {
   if (!textarea) return
   textarea.focus({ preventScroll: !reveal })
   textarea.setSelectionRange(selection.start, selection.end, selection.direction)
+  resizeComposerTextarea(textarea)
   try { navigator.virtualKeyboard?.show() } catch {}
   if (!reveal) return
   state.followMessages = true
-  const revealComposer = () => {
+  const revealAfterKeyboard = () => {
     if (document.activeElement !== textarea || !textarea.isConnected) return
-    window.scrollTo(0, document.documentElement.scrollHeight)
-    textarea.scrollIntoView({ block: "nearest" })
+    revealComposer(textarea)
   }
-  requestAnimationFrame(revealComposer)
-  setTimeout(revealComposer, 350)
+  requestAnimationFrame(revealAfterKeyboard)
+  setTimeout(revealAfterKeyboard, 350)
+}
+
+let speechDictation = null
+
+function speechRecognitionConstructor() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition
+}
+
+function updateDictationButton() {
+  const button = app.querySelector("[data-dictate]")
+  if (!button) return
+  const supported = Boolean(speechRecognitionConstructor())
+  const active = supported && speechDictation?.key === conversationKey()
+  button.hidden = !supported
+  button.classList.toggle("recording", active)
+  button.setAttribute("aria-pressed", String(active))
+  button.setAttribute("aria-label", active ? "Stop dictation" : "Start dictation")
+  button.title = active ? "Stop dictation" : "Start dictation"
+}
+
+function stopDictation(abort = false) {
+  const current = speechDictation
+  if (!current) return
+  if (abort) {
+    speechDictation = null
+    current.aborted = true
+    try { current.recognition.abort() } catch {}
+    updateDictationButton()
+    return
+  }
+  try { current.recognition.stop() } catch {}
+}
+
+function concatSpeechTranscripts(...parts) {
+  return parts.map((part) => part.trim()).filter(Boolean).join(" ")
+}
+
+function applyDictationTranscript(current) {
+  const transcript = concatSpeechTranscripts(current.finalTranscript, current.interimTranscript)
+  const before = current.prefix && transcript && !/\s$/.test(current.prefix) ? " " : ""
+  const after = current.suffix && transcript && !/^\s|^[,.;!?]/.test(current.suffix) ? " " : ""
+  current.textarea.value = `${current.prefix}${before}${transcript}${after}${current.suffix}`
+  const cursor = current.prefix.length + before.length + transcript.length
+  current.textarea.setSelectionRange(cursor, cursor)
+  resizeComposerTextarea(current.textarea)
+  current.textarea.dispatchEvent(new Event("input", { bubbles: true }))
+}
+
+function startDictation() {
+  const Recognition = speechRecognitionConstructor()
+  const textarea = app.querySelector("[data-composer] textarea")
+  if (!Recognition || !textarea || speechDictation) return
+  const recognition = new Recognition()
+  const end = textarea.value.length
+  const android = /Android/i.test(navigator.userAgent)
+  const current = {
+    recognition,
+    key: conversationKey(),
+    textarea,
+    prefix: textarea.value,
+    suffix: "",
+    android,
+    finalTranscript: "",
+    interimTranscript: "",
+    previousResultWasFinalOnly: false,
+    aborted: false,
+  }
+  speechDictation = current
+  recognition.continuous = !android
+  recognition.interimResults = true
+  recognition.maxAlternatives = 1
+  recognition.lang = navigator.language || "en-US"
+  recognition.onresult = (event) => {
+    if (speechDictation !== current || !textarea.isConnected || current.key !== conversationKey()) return stopDictation(true)
+    let finalTranscript = ""
+    let interimTranscript = ""
+    const firstChanged = event.resultIndex ?? Math.max(0, event.results.length - 1)
+    for (let index = firstChanged; index < event.results.length; index += 1) {
+      const result = event.results[index]
+      const transcript = result[0]?.transcript?.trim()
+      if (!transcript) continue
+      const isFinal = result.isFinal && (!android || result[0].confidence > 0)
+      if (isFinal) finalTranscript = concatSpeechTranscripts(finalTranscript, transcript)
+      else interimTranscript = concatSpeechTranscripts(interimTranscript, transcript)
+    }
+    const finalOnly = !interimTranscript && Boolean(finalTranscript)
+    if (finalOnly && current.previousResultWasFinalOnly) return
+    current.previousResultWasFinalOnly = finalOnly
+    current.finalTranscript = concatSpeechTranscripts(current.finalTranscript, finalTranscript)
+    current.interimTranscript = interimTranscript
+    applyDictationTranscript(current)
+  }
+  recognition.onerror = (event) => {
+    if (current.aborted || event.error === "aborted") return
+    const message = event.error === "not-allowed" || event.error === "service-not-allowed"
+      ? "Microphone permission was denied"
+      : event.error === "no-speech" ? "No speech detected" : `Dictation failed: ${event.error}`
+    showToast(message)
+  }
+  recognition.onend = () => {
+    if (speechDictation === current) speechDictation = null
+    updateDictationButton()
+  }
+  textarea.focus({ preventScroll: true })
+  textarea.setSelectionRange(end, end)
+  revealComposer(textarea)
+  setTimeout(() => {
+    if (speechDictation === current && document.activeElement === textarea) revealComposer(textarea)
+  }, 350)
+  updateDictationButton()
+  try {
+    recognition.start()
+  } catch (error) {
+    speechDictation = null
+    updateDictationButton()
+    showToast(error.message || "Could not start dictation")
+  }
 }
 
 let agentSwipe = null
@@ -1173,6 +1316,7 @@ app.addEventListener("pointerdown", (event) => {
 app.addEventListener("input", (event) => {
   const input = event.target
   if (input.matches("[data-composer] textarea")) {
+    resizeComposerTextarea(input)
     const key = conversationKey()
     if (input.value) state.messageDrafts.set(key, input.value)
     else state.messageDrafts.delete(key)
@@ -1256,6 +1400,11 @@ app.addEventListener("click", async (event) => {
   }
   if (target.hasAttribute("data-close-agents")) {
     setAgentDrawerOpen(false)
+    return
+  }
+  if (target.hasAttribute("data-dictate")) {
+    if (speechDictation) stopDictation()
+    else startDictation()
     return
   }
   if (target.hasAttribute("data-back")) {
@@ -1393,6 +1542,7 @@ app.addEventListener("submit", async (event) => {
   const form = event.target.closest("[data-composer]")
   if (!form) return
   event.preventDefault()
+  stopDictation(true)
   const textarea = form.elements.message
   const text = textarea.value.trim()
   if (!text) return
@@ -1405,6 +1555,7 @@ app.addEventListener("submit", async (event) => {
     state.messageDrafts.delete(key)
     persistDrafts()
     textarea.value = ""
+    resizeComposerTextarea(textarea)
     if (routeMatches(iid, sid)) scheduleMessagesRefresh()
   } catch (error) {
     showToast(error.message)
@@ -1412,6 +1563,7 @@ app.addEventListener("submit", async (event) => {
 })
 
 window.addEventListener("hashchange", () => {
+  stopDictation(true)
   document.body.classList.remove("changes-open", "sessions-open", "agent-drawer-open")
   clearTimeout(state.refreshTimer)
   clearTimeout(state.changesTimer)
@@ -1445,6 +1597,11 @@ window.addEventListener("hashchange", () => {
 window.addEventListener("scroll", () => {
   if (state.routeSessionId) state.followMessages = isNearBottom()
 }, { passive: true })
+
+window.visualViewport?.addEventListener("resize", updateKeyboardInset)
+window.visualViewport?.addEventListener("scroll", updateKeyboardInset)
+window.addEventListener("resize", updateKeyboardInset)
+updateKeyboardInset()
 
 function maybeNotify(event) {
   if (!("Notification" in window) || Notification.permission !== "granted") return
