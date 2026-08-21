@@ -330,7 +330,7 @@ function renderConversationShell() {
             <span>Mode</span>
             <select data-agent-select aria-label="OpenCode mode"><option value="">Loading modes…</option></select>
           </label>
-          <textarea name="message" rows="1" placeholder="Message OpenCode…" autocomplete="off">${esc(draft)}</textarea>
+          <textarea name="message" rows="1" placeholder="Message OpenCode…" autocomplete="off" aria-keyshortcuts="Enter" title="Enter to send, Shift+Enter for a new line">${esc(draft)}</textarea>
         </div>
         <div class="composer-actions">
           <button type="button" class="stop-button" data-stop hidden aria-label="Stop current request" title="Stop current request">
@@ -492,6 +492,13 @@ app.addEventListener("input", (event) => {
     state.questionAnswers.set(rid, answers)
     persistDrafts()
   }
+})
+
+app.addEventListener("keydown", (event) => {
+  const textarea = event.target.closest("[data-composer] textarea")
+  if (!textarea || event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  textarea.form.requestSubmit()
 })
 
 app.addEventListener("change", async (event) => {
