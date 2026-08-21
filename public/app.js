@@ -22,6 +22,7 @@ const state = {
   loadingChangesSession: "",
   changesOpen: false,
   sessionsOpen: false,
+  agentDrawerOpen: false,
   creatingSession: false,
   switchingSessionId: "",
   changesTimer: null,
@@ -38,6 +39,7 @@ const state = {
   renderedAgents: "",
   renderedChanges: "",
   renderedSessions: "",
+  renderedAgentNavigation: "",
   attentionRequest: "",
   attentionCollapsed: false,
   followMessages: true,
@@ -131,7 +133,7 @@ function titleFor(session) {
 }
 
 function statusFor(session) {
-  if (session.attention) return { label: "needs input", className: "attention" }
+  if (session.attention) return { label: "blocked", className: "attention" }
   const type = session.status?.type || "idle"
   return { label: type === "busy" ? "working" : type, className: type }
 }
@@ -576,19 +578,55 @@ function instanceTitle(instance) {
   return instance?.serviceName || projectLabel(instance) || instance?.source || instance?.id || "Instance"
 }
 
+function agentStatus(instance) {
+  const session = sessionFor(instance.id, instance.activeSessionId)
+  const status = !instance.connected
+    ? { label: "offline", className: "offline" }
+    : session ? statusFor(session) : { label: "idle", className: "idle" }
+  return { session, status }
+}
+
+function agentSummary(instances) {
+  const counts = { working: 0, blocked: 0, idle: 0, offline: 0 }
+  const blocked = []
+  for (const instance of instances) {
+    const { session, status } = agentStatus(instance)
+    if (status.className === "busy" || status.className === "retry") counts.working += 1
+    else if (status.className === "attention") {
+      counts.blocked += 1
+      if (session) blocked.push({ instance, session })
+    } else if (status.className === "idle") counts.idle += 1
+    else counts.offline += 1
+  }
+  return { counts, blocked }
+}
+
+function renderAgentSummary(instances) {
+  const { counts, blocked } = agentSummary(instances)
+  const countItems = [
+    ["working", counts.working, "working"],
+    ["blocked", counts.blocked, "blocked"],
+    ["idle", counts.idle, "idle"],
+    ["offline", counts.offline, "offline"],
+  ].filter(([, count]) => count > 0)
+  const summaryLabel = countItems.map(([label, count]) => `${count} ${label}`).join(", ") || "No agents"
+  const countsHtml = countItems.map(([label, count, className]) => `<span class="agent-count ${className}" title="${esc(`${count} ${label}`)}"><i aria-hidden="true"></i>${count}</span>`).join("")
+  const alerts = blocked.length
+    ? `<div class="agent-alerts">${blocked.map(({ instance, session }) => `<button type="button" class="agent-alert blocked" data-open-session="${esc(session.id)}" data-instance-id="${esc(instance.id)}"><i aria-hidden="true"></i><span>${esc(titleFor(session))}</span><strong>blocked</strong></button>`).join("")}</div>`
+    : ""
+  return `<button type="button" class="agent-summary" data-open-agents aria-label="Open agents. ${esc(summaryLabel)}"><span class="agent-summary-label">Agents</span>${countsHtml}</button>${alerts}`
+}
+
 function renderAgentList(instances) {
   if (!instances.length) return `<div class="empty">No OpenCode agents found.</div>`
   return `<div class="agent-list">${instances.map((instance) => {
-    const session = sessionFor(instance.id, instance.activeSessionId)
-    const status = !instance.connected
-      ? { label: "offline", className: "offline" }
-      : session ? statusFor(session) : { label: "idle", className: "idle" }
-    const details = [session?.agent || session?.mode, projectLabel(instance) || instance.serviceName].filter(Boolean)
+    const { session, status } = agentStatus(instance)
+    const details = projectLabel(instance) || instance.serviceName || instanceTitle(instance)
     const openable = session && instance.connected
     return `<button class="agent-card" ${openable ? `data-open-session="${esc(session.id)}" data-instance-id="${esc(instance.id)}"` : "disabled"}>
       <span class="agent-main">
         <span class="agent-title">${esc(session ? titleFor(session) : "No active session")}</span>
-        <span class="agent-subtitle">${esc(details.join(" · ") || instanceTitle(instance))}</span>
+        <span class="agent-subtitle">${esc(details)}</span>
       </span>
       <span class="badge ${status.className}">${esc(status.label)}</span>
     </button>`
@@ -614,17 +652,31 @@ function renderList() {
 function renderConversationShell() {
   const draft = state.messageDrafts.get(conversationKey()) || ""
   return `<div class="shell conversation">
-    <header class="topbar">
-      <button class="icon-button" data-back aria-label="Back">←</button>
-      <div style="min-width:0;flex:1">
-        <h1 data-session-title style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></h1>
-        <div class="connection"><span class="badge idle" data-session-status>idle</span></div>
+    <header class="topbar conversation-topbar">
+      <div class="topbar-row">
+        <button class="icon-button agent-drawer-button" data-open-agents aria-label="Open agents" title="Open agents">☰</button>
+        <div style="min-width:0;flex:1">
+          <h1 data-session-title style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></h1>
+          <div class="connection"><span class="badge idle" data-session-status>idle</span></div>
+        </div>
+        <button class="icon-button changes-button" data-open-changes hidden aria-label="Open session changes" title="Session changes"><span aria-hidden="true">±</span><small data-changes-count></small></button>
+        <button class="icon-button sessions-button" data-open-sessions aria-label="Switch session" title="Switch session"><span aria-hidden="true">☷</span></button>
       </div>
-      <button class="icon-button changes-button" data-open-changes hidden aria-label="Open session changes" title="Session changes"><span aria-hidden="true">±</span><small data-changes-count></small></button>
-      <button class="icon-button sessions-button" data-open-sessions aria-label="Switch session" title="Switch session"><span aria-hidden="true">☷</span></button>
+      <div class="agent-radar" data-agent-radar></div>
     </header>
     <div class="meta" data-session-meta></div>
     <div data-messages></div>
+    <div class="agent-swipe-edge" data-agent-swipe-edge aria-hidden="true"></div>
+    <div class="agent-drawer-overlay" data-agent-drawer-overlay hidden>
+      <button type="button" class="agent-drawer-backdrop" data-close-agents aria-label="Close agents"></button>
+      <aside class="agent-drawer" role="dialog" aria-modal="true" aria-labelledby="agent-drawer-title">
+        <header class="agent-drawer-header">
+          <div><h2 id="agent-drawer-title">Agents</h2><p data-agent-drawer-summary></p></div>
+          <button type="button" class="icon-button" data-close-agents aria-label="Close agents">×</button>
+        </header>
+        <div class="agent-drawer-content" data-agent-drawer-content></div>
+      </aside>
+    </div>
     <div class="changes-overlay" data-changes-overlay hidden>
       <button type="button" class="changes-backdrop" data-close-changes aria-label="Close session changes"></button>
       <section class="changes-drawer" role="dialog" aria-modal="true" aria-labelledby="changes-title">
@@ -762,11 +814,44 @@ function updateAttention(force = false) {
 
 function setChangesOpen(open) {
   if (open && state.sessionsOpen) setSessionsOpen(false)
+  if (open && state.agentDrawerOpen) setAgentDrawerOpen(false)
   state.changesOpen = open
   document.body.classList.toggle("changes-open", open)
   if (open) state.followMessages = false
   else state.followMessages = isNearBottom()
   updateChangesView()
+}
+
+function setAgentDrawerOpen(open) {
+  if (open && state.changesOpen) setChangesOpen(false)
+  if (open && state.sessionsOpen) setSessionsOpen(false)
+  state.agentDrawerOpen = open
+  document.body.classList.toggle("agent-drawer-open", open)
+  updateAgentNavigation()
+}
+
+function updateAgentNavigation() {
+  const radar = app.querySelector("[data-agent-radar]")
+  const overlay = app.querySelector("[data-agent-drawer-overlay]")
+  const content = app.querySelector("[data-agent-drawer-content]")
+  if (!radar || !overlay || !content) return
+  const instances = state.snapshot.instances || []
+  overlay.hidden = !state.agentDrawerOpen && !agentSwipe?.active
+  const { counts } = agentSummary(instances)
+  overlay.querySelector("[data-agent-drawer-summary]").textContent = [
+    counts.working ? `${counts.working} working` : "",
+    counts.blocked ? `${counts.blocked} blocked` : "",
+    counts.idle ? `${counts.idle} idle` : "",
+    counts.offline ? `${counts.offline} offline` : "",
+  ].filter(Boolean).join(" · ") || "No agents"
+  const radarHtml = renderAgentSummary(instances)
+  const drawerHtml = renderAgentList(instances)
+  const key = `${radarHtml}\n${drawerHtml}`
+  if (state.renderedAgentNavigation !== key) {
+    radar.innerHTML = radarHtml
+    content.innerHTML = drawerHtml
+    state.renderedAgentNavigation = key
+  }
 }
 
 function renderSessionDrawer() {
@@ -789,6 +874,7 @@ function renderSessionDrawer() {
 
 function setSessionsOpen(open) {
   if (open && state.changesOpen) setChangesOpen(false)
+  if (open && state.agentDrawerOpen) setAgentDrawerOpen(false)
   state.sessionsOpen = open
   document.body.classList.toggle("sessions-open", open)
   updateSessionsView()
@@ -852,6 +938,7 @@ function updateConversation(session) {
   updateAgentSelector()
   updateChangesView()
   updateSessionsView()
+  updateAgentNavigation()
 
   updateAttention()
 
@@ -867,7 +954,7 @@ function updateConversation(session) {
 
 function render() {
   if (!state.routeSessionId) {
-    document.body.classList.remove("changes-open", "sessions-open")
+    document.body.classList.remove("changes-open", "sessions-open", "agent-drawer-open")
     state.viewKey = "list"
     app.innerHTML = renderList()
     return
@@ -892,6 +979,7 @@ function render() {
     state.renderedAgents = ""
     state.renderedChanges = ""
     state.renderedSessions = ""
+    state.renderedAgentNavigation = ""
     state.attentionRequest = ""
     state.attentionCollapsed = false
     state.followMessages = true
@@ -946,6 +1034,75 @@ function restoreComposerFocus(reveal = false) {
   requestAnimationFrame(revealComposer)
   setTimeout(revealComposer, 350)
 }
+
+let agentSwipe = null
+
+function finishAgentSwipe(open) {
+  if (!agentSwipe) return
+  const overlay = app.querySelector("[data-agent-drawer-overlay]")
+  const drawer = overlay?.querySelector(".agent-drawer")
+  const backdrop = overlay?.querySelector(".agent-drawer-backdrop")
+  overlay?.classList.remove("dragging")
+  drawer?.style.removeProperty("transform")
+  backdrop?.style.removeProperty("opacity")
+  agentSwipe = null
+  if (open) setAgentDrawerOpen(true)
+  else if (state.agentDrawerOpen) setAgentDrawerOpen(false)
+  else if (overlay) {
+    overlay.hidden = true
+    document.body.classList.remove("agent-drawer-open")
+  }
+}
+
+app.addEventListener("pointerdown", (event) => {
+  const edge = event.target.closest("[data-agent-swipe-edge]")
+  const overlay = event.target.closest("[data-agent-drawer-overlay]")
+  if (!event.isPrimary || !["touch", "pen"].includes(event.pointerType)) return
+  const mode = state.agentDrawerOpen && overlay ? "close" : "open"
+  if (mode === "open" && (!edge || !state.routeSessionId || state.agentDrawerOpen || state.changesOpen || state.sessionsOpen)) return
+  if (mode === "close" && !overlay) return
+  agentSwipe = { mode, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, startedAt: performance.now(), active: false, width: 0, dx: 0 }
+})
+
+app.addEventListener("pointermove", (event) => {
+  if (!agentSwipe || event.pointerId !== agentSwipe.pointerId) return
+  const dx = Math.max(0, agentSwipe.mode === "open" ? event.clientX - agentSwipe.startX : agentSwipe.startX - event.clientX)
+  const dy = Math.abs(event.clientY - agentSwipe.startY)
+  agentSwipe.dx = dx
+  if (!agentSwipe.active) {
+    if (dy > 12 && dy > dx) return finishAgentSwipe(agentSwipe.mode === "close")
+    if (dx < 10 || dx < dy * 1.25) return
+    updateAgentNavigation()
+    const overlay = app.querySelector("[data-agent-drawer-overlay]")
+    const drawer = overlay?.querySelector(".agent-drawer")
+    if (!overlay || !drawer) return finishAgentSwipe(false)
+    overlay.hidden = false
+    overlay.classList.add("dragging")
+    document.body.classList.add("agent-drawer-open")
+    agentSwipe.active = true
+    agentSwipe.width = drawer.getBoundingClientRect().width
+  }
+  const overlay = app.querySelector("[data-agent-drawer-overlay]")
+  const drawer = overlay?.querySelector(".agent-drawer")
+  const backdrop = overlay?.querySelector(".agent-drawer-backdrop")
+  const progress = Math.min(1, dx / agentSwipe.width)
+  const offset = agentSwipe.mode === "open" ? Math.min(0, dx - agentSwipe.width) : -Math.min(dx, agentSwipe.width)
+  drawer?.style.setProperty("transform", `translateX(${offset}px)`)
+  backdrop?.style.setProperty("opacity", String(agentSwipe.mode === "open" ? progress : 1 - progress))
+})
+
+app.addEventListener("pointerup", (event) => {
+  if (!agentSwipe || event.pointerId !== agentSwipe.pointerId) return
+  const elapsed = Math.max(1, performance.now() - agentSwipe.startedAt)
+  const distance = agentSwipe.mode === "close" ? agentSwipe.width * 0.15 : agentSwipe.width * 0.3
+  const crossedThreshold = agentSwipe.active && (agentSwipe.dx >= distance || (agentSwipe.dx >= 32 && agentSwipe.dx / elapsed >= 0.35))
+  const open = agentSwipe.mode === "open" ? crossedThreshold : !crossedThreshold
+  finishAgentSwipe(open)
+})
+
+app.addEventListener("pointercancel", (event) => {
+  if (agentSwipe?.pointerId === event.pointerId) finishAgentSwipe(agentSwipe.mode === "close")
+})
 
 async function selectAndNavigate(instanceId, sessionId) {
   if (!instanceId || !sessionId || state.switchingSessionId || state.creatingSession) return
@@ -1063,6 +1220,11 @@ app.addEventListener("keydown", (event) => {
     setSessionsOpen(false)
     return
   }
+  if (event.key === "Escape" && state.agentDrawerOpen) {
+    event.preventDefault()
+    setAgentDrawerOpen(false)
+    return
+  }
   const textarea = event.target.closest("[data-composer] textarea")
   if (!textarea || event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) return
   event.preventDefault()
@@ -1083,7 +1245,17 @@ app.addEventListener("click", async (event) => {
   if (target.dataset.openSession) {
     const instanceId = target.dataset.instanceId
     const sessionId = target.dataset.openSession
+    setAgentDrawerOpen(false)
     await selectAndNavigate(instanceId, sessionId)
+    return
+  }
+  if (target.hasAttribute("data-open-agents")) {
+    setAgentDrawerOpen(true)
+    requestAnimationFrame(() => app.querySelector(".agent-drawer-header [data-close-agents]")?.focus())
+    return
+  }
+  if (target.hasAttribute("data-close-agents")) {
+    setAgentDrawerOpen(false)
     return
   }
   if (target.hasAttribute("data-back")) {
@@ -1240,7 +1412,7 @@ app.addEventListener("submit", async (event) => {
 })
 
 window.addEventListener("hashchange", () => {
-  document.body.classList.remove("changes-open", "sessions-open")
+  document.body.classList.remove("changes-open", "sessions-open", "agent-drawer-open")
   clearTimeout(state.refreshTimer)
   clearTimeout(state.changesTimer)
   const wasConversation = Boolean(state.routeSessionId)
@@ -1261,6 +1433,7 @@ window.addEventListener("hashchange", () => {
   state.loadingChangesSession = ""
   state.changesOpen = false
   state.sessionsOpen = false
+  state.agentDrawerOpen = false
   state.diffs.clear()
   state.diffErrors.clear()
   state.loadingDiffs.clear()
