@@ -147,4 +147,6 @@ npm run check
 npm run dev
 ```
 
+`npm run dev` restarts the Node server when backend modules change and reloads connected browsers when backend or `public/` files change.
+
 No third-party runtime dependencies are used.

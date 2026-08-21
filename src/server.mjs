@@ -1,5 +1,5 @@
 import http from "node:http"
-import { createReadStream } from "node:fs"
+import { createReadStream, watch } from "node:fs"
 import { stat } from "node:fs/promises"
 import { extname, join, normalize } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -10,6 +10,10 @@ const config = loadConfig()
 const bridge = new OpenCodeBridge(config)
 const publicDir = fileURLToPath(new URL("../public/", import.meta.url))
 const sseClients = new Set()
+const devMode = process.argv.includes("--dev")
+const devServerId = `${process.pid}-${Date.now()}`
+let publicWatcher = null
+let reloadTimer = null
 
 function json(res, status, data) {
   const body = JSON.stringify(data)
@@ -38,6 +42,14 @@ function broadcast(type, payload) {
   for (const client of sseClients) client.write(frame)
 }
 
+if (devMode) {
+  publicWatcher = watch(publicDir, { recursive: true }, () => {
+    clearTimeout(reloadTimer)
+    reloadTimer = setTimeout(() => broadcast("dev-reload", { at: Date.now() }), 100)
+  })
+  publicWatcher.on("error", (error) => console.error("Live reload watcher failed", error))
+}
+
 bridge.on("state", (state) => broadcast("state", state))
 bridge.on("event", (event) => broadcast("agent-event", event))
 
@@ -62,7 +74,7 @@ async function serveStatic(req, res, pathname) {
     if (info.isDirectory()) file = join(file, "index.html")
     res.writeHead(200, {
       "Content-Type": mime(file),
-      "Cache-Control": file.endsWith("index.html") ? "no-cache" : "public, max-age=300",
+      "Cache-Control": devMode ? "no-store" : file.endsWith("index.html") ? "no-cache" : "public, max-age=300",
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
     })
@@ -96,6 +108,7 @@ const server = http.createServer(async (req, res) => {
         "X-Accel-Buffering": "no",
       })
       res.write(`event: state\ndata: ${JSON.stringify(bridge.snapshot())}\n\n`)
+      if (devMode) res.write(`event: dev-server\ndata: ${JSON.stringify({ id: devServerId })}\n\n`)
       const timer = setInterval(() => res.write(": heartbeat\n\n"), 15_000)
       sseClients.add(res)
       req.on("close", () => {
@@ -175,12 +188,15 @@ await bridge.start()
 server.listen(config.port, config.host, () => {
   console.log(`OpenCode Pocket: http://${config.host}:${config.port}`)
   console.log(`OpenCode server: ${config.openCodeUrl}`)
+  if (devMode) console.log("Live reload: enabled")
   if (!config.openCodePassword) console.log("OpenCode auth: none configured in Pocket")
 })
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
     bridge.stop()
+    clearTimeout(reloadTimer)
+    publicWatcher?.close()
     server.close(() => process.exit(0))
   })
 }

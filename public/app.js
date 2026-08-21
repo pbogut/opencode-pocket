@@ -691,7 +691,14 @@ function maybeNotify(event) {
   if (event.type === "permission.asked") new Notification(`${title} needs permission`, { body: event.request?.title || event.request?.type || "Permission requested", tag: event.requestId })
 }
 
+let devServerId = ""
 const source = new EventSource("/api/events")
+source.addEventListener("dev-server", (event) => {
+  const nextId = JSON.parse(event.data).id
+  if (devServerId && devServerId !== nextId) return location.reload()
+  devServerId = nextId
+})
+source.addEventListener("dev-reload", () => location.reload())
 source.addEventListener("state", (event) => {
   state.snapshot = JSON.parse(event.data)
   render()
