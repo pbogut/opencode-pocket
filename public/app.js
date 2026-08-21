@@ -1120,6 +1120,7 @@ window.addEventListener("hashchange", () => {
   document.body.classList.remove("changes-open")
   clearTimeout(state.refreshTimer)
   clearTimeout(state.changesTimer)
+  const wasConversation = Boolean(state.routeSessionId)
   const route = routeFromHash()
   state.routeInstanceId = route.instanceId
   state.routeSessionId = route.sessionId
@@ -1140,6 +1141,7 @@ window.addEventListener("hashchange", () => {
   state.diffErrors.clear()
   state.loadingDiffs.clear()
   render()
+  if (wasConversation && !state.routeSessionId) requestAnimationFrame(() => window.scrollTo(0, 0))
   if (state.routeSessionId) loadConversation()
 })
 
