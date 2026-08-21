@@ -64,6 +64,17 @@ button { color: inherit; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .permission-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #0f1217; border-radius: 10px; padding: 10px; white-space: pre-wrap; word-break: break-word; font-size: 12px; color: #d9dce2; }
 .composer-wrap { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 18%); }
+.attention-sheet { max-width: 732px; margin: 0 auto 8px; overflow: hidden; border: 1px solid #6c5828; border-radius: 18px; background: #211c12; box-shadow: 0 -14px 36px rgb(0 0 0 / .35); }
+.attention-sheet[hidden] { display: none; }
+.attention-sheet-toggle { width: 100%; min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 0; background: #2a2415; padding: 10px 14px; text-align: left; cursor: pointer; }
+.attention-sheet-toggle strong, .attention-sheet-toggle small { display: block; }
+.attention-sheet-toggle strong { color: #ffe2a6; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+.attention-sheet-toggle small { margin-top: 2px; color: var(--muted); font-size: 11px; }
+.attention-sheet-action { color: #ffe2a6; font-size: 12px; font-weight: 700; }
+.attention-sheet-body { max-height: 55vh; max-height: min(55dvh, 520px); overflow-y: auto; overscroll-behavior: contain; }
+.attention-sheet.collapsed .attention-sheet-body { display: none; }
+.attention-sheet .attention-card { margin: 0; border: 0; border-radius: 0; background: transparent; }
+.attention-sheet .attention-card + .attention-card { border-top: 1px solid #6c5828; }
 .composer { max-width: 732px; margin: 0 auto; display: flex; gap: 8px; align-items: end; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); padding: 8px; }
 .composer textarea { min-width: 0; flex: 1; resize: none; max-height: 150px; min-height: 42px; border: 0; outline: none; background: transparent; color: var(--text); padding: 10px; }
 .composer button { border-radius: 12px; border: 0; background: var(--text); color: #111318; padding: 11px 15px; font-weight: 700; }

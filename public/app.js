@@ -16,6 +16,8 @@ const state = {
   viewKey: "",
   renderedMessages: "",
   renderedAttention: "",
+  attentionRequest: "",
+  attentionCollapsed: false,
   followMessages: true,
 }
 
@@ -274,31 +276,62 @@ function renderConversationShell() {
       <button class="icon-button" data-abort title="Abort session">■</button>
     </header>
     <div class="meta" data-session-meta></div>
-    <div data-attention></div>
     <div data-messages></div>
-    <div class="composer-wrap"><form class="composer" data-composer>
-      <textarea name="message" rows="1" placeholder="Message OpenCode…" autocomplete="off">${esc(draft)}</textarea>
-      <div class="composer-actions">
-        <button type="button" class="stop-button" data-stop hidden aria-label="Stop current request" title="Stop current request">
-          <span class="activity-ring" aria-hidden="true"></span>
-          <span class="stop-square" aria-hidden="true"></span>
+    <div class="composer-wrap">
+      <section class="attention-sheet" data-attention-sheet hidden>
+        <button type="button" class="attention-sheet-toggle" data-toggle-attention aria-expanded="true">
+          <span><strong>Needs input</strong><small data-attention-summary></small></span>
+          <span class="attention-sheet-action" data-attention-action>Hide</span>
         </button>
-        <button type="submit">Send</button>
-      </div>
-    </form></div>
+        <div class="attention-sheet-body" data-attention></div>
+      </section>
+      <form class="composer" data-composer>
+        <textarea name="message" rows="1" placeholder="Message OpenCode…" autocomplete="off">${esc(draft)}</textarea>
+        <div class="composer-actions">
+          <button type="button" class="stop-button" data-stop hidden aria-label="Stop current request" title="Stop current request">
+            <span class="activity-ring" aria-hidden="true"></span>
+            <span class="stop-square" aria-hidden="true"></span>
+          </button>
+          <button type="submit">Send</button>
+        </div>
+      </form>
+    </div>
     <div data-toast></div>
   </div>`
 }
 
 function updateAttention(force = false) {
   const slot = app.querySelector("[data-attention]")
-  if (!slot) return
+  const sheet = app.querySelector("[data-attention-sheet]")
+  if (!slot || !sheet) return
   const question = pendingQuestion(state.routeSessionId)
   const permission = pendingPermission(state.routeSessionId)
+  const requestKey = `${questionId(question)}:${permissionId(permission)}`
   const key = JSON.stringify([question || null, permission || null])
-  if (!force && state.renderedAttention === key) return
-  slot.innerHTML = `${renderQuestionCard(question)}${renderPermissionCard(permission)}`
-  state.renderedAttention = key
+
+  if (!question && !permission) {
+    sheet.hidden = true
+    state.attentionRequest = ""
+    state.attentionCollapsed = false
+  } else {
+    if (state.attentionRequest !== requestKey) {
+      state.attentionRequest = requestKey
+      state.attentionCollapsed = false
+    }
+    sheet.hidden = false
+    sheet.classList.toggle("collapsed", state.attentionCollapsed)
+    const toggle = sheet.querySelector("[data-toggle-attention]")
+    toggle.setAttribute("aria-expanded", String(!state.attentionCollapsed))
+    sheet.querySelector("[data-attention-action]").textContent = state.attentionCollapsed ? "Show" : "Hide"
+    sheet.querySelector("[data-attention-summary]").textContent = question && permission
+      ? "Question and permission waiting"
+      : question ? "Question waiting" : "Permission waiting"
+  }
+
+  if (force || state.renderedAttention !== key) {
+    slot.innerHTML = `${renderQuestionCard(question)}${renderPermissionCard(permission)}`
+    state.renderedAttention = key
+  }
 }
 
 function updateConversation(session) {
@@ -351,6 +384,8 @@ function render() {
     state.viewKey = key
     state.renderedMessages = ""
     state.renderedAttention = ""
+    state.attentionRequest = ""
+    state.attentionCollapsed = false
     state.followMessages = true
   }
   updateConversation(session)
@@ -433,6 +468,11 @@ app.addEventListener("click", async (event) => {
     } finally {
       target.disabled = false
     }
+    return
+  }
+  if (target.hasAttribute("data-toggle-attention")) {
+    state.attentionCollapsed = !state.attentionCollapsed
+    updateAttention()
     return
   }
 
