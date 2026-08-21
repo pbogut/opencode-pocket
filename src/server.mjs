@@ -138,7 +138,17 @@ const server = http.createServer(async (req, res) => {
       return
     }
 
-    let match = path.match(/^\/api\/instances\/([^/]+)\/sessions\/([^/]+)\/messages$/)
+    let match = path.match(/^\/api\/instances\/([^/]+)\/sessions$/)
+    if (match && req.method === "POST") {
+      const input = await bodyJson(req)
+      const bridge = manager.bridge(decodeURIComponent(match[1]))
+      const directory = typeof input.directory === "string" ? input.directory.trim() : ""
+      const session = await bridge.createSession(directory)
+      await bridge.selectSession(session.id)
+      return json(res, 201, session)
+    }
+
+    match = path.match(/^\/api\/instances\/([^/]+)\/sessions\/([^/]+)\/messages$/)
     if (match && req.method === "GET") {
       const bridge = manager.bridge(decodeURIComponent(match[1]))
       const sid = decodeURIComponent(match[2])
@@ -219,8 +229,9 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" })
     res.end("Not found")
   } catch (error) {
-    console.error(error)
-    json(res, 500, { error: String(error.message || error) })
+    const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500
+    if (status >= 500) console.error(error)
+    json(res, status, { error: String(error.message || error) })
   }
 })
 

@@ -397,6 +397,15 @@ export class OpenCodeBridge extends EventEmitter {
     })
   }
 
+  async createSession(directory = "") {
+    const path = queryWithDirectory("/session", directory || this.config.openCodeDirectory)
+    const session = await this.request(path, { method: "POST", body: JSON.stringify({}) })
+    if (!session?.id) throw new Error("OpenCode returned an invalid session")
+    this.sessions.set(session.id, session)
+    this.emitState()
+    return session
+  }
+
   async sendMessage(sid, text, agent = "") {
     const body = { parts: [{ type: "text", text }], ...(agent ? { agent } : {}) }
     return this.request(this.pathForSession(`/session/${encodeURIComponent(sid)}/prompt_async`, sid), {

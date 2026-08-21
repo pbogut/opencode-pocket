@@ -21,6 +21,9 @@ const state = {
   changesSessionId: "",
   loadingChangesSession: "",
   changesOpen: false,
+  sessionsOpen: false,
+  creatingSession: false,
+  switchingSessionId: "",
   changesTimer: null,
   diffs: new Map(),
   diffErrors: new Map(),
@@ -34,6 +37,7 @@ const state = {
   renderedAttention: "",
   renderedAgents: "",
   renderedChanges: "",
+  renderedSessions: "",
   attentionRequest: "",
   attentionCollapsed: false,
   followMessages: true,
@@ -138,6 +142,13 @@ function instanceFor(id) {
 
 function sessionFor(instanceId, sessionId) {
   return state.snapshot.sessions.find((item) => item.instanceId === instanceId && item.id === sessionId)
+}
+
+function rootSessionsFor(instanceId) {
+  return state.snapshot.sessions
+    .filter((session) => session.instanceId === instanceId && !session.parentID && !session.parentId)
+    .sort((a, b) => (b?.time?.updated || b?.time?.created || 0) - (a?.time?.updated || a?.time?.created || 0))
+    .slice(0, 10)
 }
 
 function connectedTui(instance) {
@@ -610,7 +621,7 @@ function renderConversationShell() {
         <div class="connection"><span class="badge idle" data-session-status>idle</span></div>
       </div>
       <button class="icon-button changes-button" data-open-changes hidden aria-label="Open session changes" title="Session changes"><span aria-hidden="true">±</span><small data-changes-count></small></button>
-      <button class="icon-button" data-abort title="Abort session">■</button>
+      <button class="icon-button sessions-button" data-open-sessions aria-label="Switch session" title="Switch session"><span aria-hidden="true">☷</span></button>
     </header>
     <div class="meta" data-session-meta></div>
     <div data-messages></div>
@@ -622,6 +633,16 @@ function renderConversationShell() {
           <button type="button" class="icon-button" data-close-changes aria-label="Close session changes">×</button>
         </header>
         <div class="changes-content" data-changes-content></div>
+      </section>
+    </div>
+    <div class="sessions-overlay" data-sessions-overlay hidden>
+      <button type="button" class="sessions-backdrop" data-close-sessions aria-label="Close sessions"></button>
+      <section class="sessions-drawer" role="dialog" aria-modal="true" aria-labelledby="sessions-title">
+        <header class="sessions-header">
+          <div><h2 id="sessions-title">Sessions</h2><p data-sessions-summary></p></div>
+          <button type="button" class="icon-button" data-close-sessions aria-label="Close sessions">×</button>
+        </header>
+        <div class="sessions-content" data-sessions-content></div>
       </section>
     </div>
     <div class="composer-wrap">
@@ -740,11 +761,50 @@ function updateAttention(force = false) {
 }
 
 function setChangesOpen(open) {
+  if (open && state.sessionsOpen) setSessionsOpen(false)
   state.changesOpen = open
   document.body.classList.toggle("changes-open", open)
   if (open) state.followMessages = false
   else state.followMessages = isNearBottom()
   updateChangesView()
+}
+
+function renderSessionDrawer() {
+  const sessions = rootSessionsFor(state.routeInstanceId)
+  const newLabel = state.creatingSession ? "Creating session…" : "New session"
+  const choices = sessions.length
+    ? `<div class="session-choices">${sessions.map((session) => {
+      const status = statusFor(session)
+      const current = session.id === state.routeSessionId
+      const disabled = current || Boolean(state.switchingSessionId) || state.creatingSession
+      const detail = [prettyTime(session?.time?.updated || session?.time?.created), session.directory].filter(Boolean).join(" · ")
+      return `<button type="button" class="session-choice${current ? " current" : ""}" data-switch-session="${esc(session.id)}" ${disabled ? "disabled" : ""} ${current ? 'aria-current="true"' : ""}>
+        <span class="session-choice-main"><strong>${esc(titleFor(session))}</strong><small>${esc(detail || session.id)}</small></span>
+        <span class="badge ${esc(status.className)}">${esc(current ? "current" : status.label)}</span>
+      </button>`
+    }).join("")}</div>`
+    : `<div class="sessions-empty">No recent sessions.</div>`
+  return `<button type="button" class="button primary new-session-button" data-new-session ${state.creatingSession || Boolean(state.switchingSessionId) ? "disabled" : ""}>${newLabel}</button>${choices}`
+}
+
+function setSessionsOpen(open) {
+  if (open && state.changesOpen) setChangesOpen(false)
+  state.sessionsOpen = open
+  document.body.classList.toggle("sessions-open", open)
+  updateSessionsView()
+}
+
+function updateSessionsView() {
+  const overlay = app.querySelector("[data-sessions-overlay]")
+  const content = app.querySelector("[data-sessions-content]")
+  if (!overlay || !content) return
+  overlay.hidden = !state.sessionsOpen
+  overlay.querySelector("[data-sessions-summary]").textContent = instanceTitle(instanceFor(state.routeInstanceId))
+  const html = renderSessionDrawer()
+  if (state.renderedSessions !== html) {
+    content.innerHTML = html
+    state.renderedSessions = html
+  }
 }
 
 function updateChangesView() {
@@ -791,6 +851,7 @@ function updateConversation(session) {
   stop.title = activity === "retry" ? "Agent is retrying. Stop current request" : "Agent is working. Stop current request"
   updateAgentSelector()
   updateChangesView()
+  updateSessionsView()
 
   updateAttention()
 
@@ -806,7 +867,7 @@ function updateConversation(session) {
 
 function render() {
   if (!state.routeSessionId) {
-    document.body.classList.remove("changes-open")
+    document.body.classList.remove("changes-open", "sessions-open")
     state.viewKey = "list"
     app.innerHTML = renderList()
     return
@@ -830,6 +891,7 @@ function render() {
     state.renderedAttention = ""
     state.renderedAgents = ""
     state.renderedChanges = ""
+    state.renderedSessions = ""
     state.attentionRequest = ""
     state.attentionCollapsed = false
     state.followMessages = true
@@ -885,6 +947,65 @@ function restoreComposerFocus(reveal = false) {
   setTimeout(revealComposer, 350)
 }
 
+async function selectAndNavigate(instanceId, sessionId) {
+  if (!instanceId || !sessionId || state.switchingSessionId || state.creatingSession) return
+  if (routeMatches(instanceId, sessionId)) {
+    setSessionsOpen(false)
+    return
+  }
+  const instance = instanceFor(instanceId)
+  const tui = connectedTui(instance)
+  const selection = tui && !isSessionInTui(instance, sessionId) ? { instanceId, sessionId } : null
+  state.directFollowInstanceId = ""
+  state.followInstanceId = tui ? instanceId : ""
+  state.pendingTuiSelection = selection
+  state.switchingSessionId = sessionId
+  updateSessionsView()
+  try {
+    if (selection) await api(sessionApiPath(instanceId, sessionId, "select"), { method: "POST" })
+    setSessionsOpen(false)
+    navigateTo(instanceId, sessionId)
+  } catch (error) {
+    if (state.pendingTuiSelection === selection) state.pendingTuiSelection = null
+    state.followInstanceId = ""
+    showToast(error.message)
+  } finally {
+    if (state.switchingSessionId === sessionId) state.switchingSessionId = ""
+    updateSessionsView()
+  }
+}
+
+async function createAndOpenSession() {
+  if (state.creatingSession || state.switchingSessionId) return
+  const instanceId = state.routeInstanceId
+  const current = sessionFor(instanceId, state.routeSessionId)
+  if (!instanceId || !current) return
+  state.creatingSession = true
+  updateSessionsView()
+  try {
+    const session = await api(`/api/instances/${encodeURIComponent(instanceId)}/sessions`, {
+      method: "POST",
+      body: JSON.stringify({ directory: current.directory || "" }),
+    })
+    state.snapshot.sessions = [
+      { ...session, instanceId },
+      ...state.snapshot.sessions.filter((item) => item.instanceId !== instanceId || item.id !== session.id),
+    ]
+    const instance = instanceFor(instanceId)
+    const tui = connectedTui(instance)
+    state.directFollowInstanceId = ""
+    state.followInstanceId = tui ? instanceId : ""
+    state.pendingTuiSelection = tui && !isSessionInTui(instance, session.id) ? { instanceId, sessionId: session.id } : null
+    setSessionsOpen(false)
+    navigateTo(instanceId, session.id)
+  } catch (error) {
+    showToast(error.message)
+  } finally {
+    state.creatingSession = false
+    updateSessionsView()
+  }
+}
+
 app.addEventListener("pointerdown", (event) => {
   const control = event.target.closest("[data-agent-select], [data-cycle-agent]")
   if (!control) return
@@ -937,6 +1058,11 @@ app.addEventListener("keydown", (event) => {
     setChangesOpen(false)
     return
   }
+  if (event.key === "Escape" && state.sessionsOpen) {
+    event.preventDefault()
+    setSessionsOpen(false)
+    return
+  }
   const textarea = event.target.closest("[data-composer] textarea")
   if (!textarea || event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) return
   event.preventDefault()
@@ -957,22 +1083,7 @@ app.addEventListener("click", async (event) => {
   if (target.dataset.openSession) {
     const instanceId = target.dataset.instanceId
     const sessionId = target.dataset.openSession
-    const instance = instanceFor(instanceId)
-    const tui = connectedTui(instance)
-    state.directFollowInstanceId = ""
-    state.followInstanceId = tui ? instanceId : ""
-    const selection = tui && !isSessionInTui(instance, sessionId) ? { instanceId, sessionId } : null
-    state.pendingTuiSelection = selection
-    navigateTo(instanceId, sessionId)
-    if (tui) {
-      try {
-        await api(sessionApiPath(instanceId, sessionId, "select"), { method: "POST" })
-      } catch (error) {
-        if (state.pendingTuiSelection === selection) state.pendingTuiSelection = null
-        reconcileTuiRoute()
-        showToast(error.message)
-      }
-    }
+    await selectAndNavigate(instanceId, sessionId)
     return
   }
   if (target.hasAttribute("data-back")) {
@@ -992,9 +1103,21 @@ app.addEventListener("click", async (event) => {
     showToast(permission === "granted" ? "Notifications enabled" : `Notifications: ${permission}`)
     return
   }
-  if (target.hasAttribute("data-abort")) {
-    if (!confirm("Abort this OpenCode session?")) return
-    try { await api(sessionApiPath(state.routeInstanceId, state.routeSessionId, "abort"), { method: "POST" }); showToast("Abort sent") } catch (error) { showToast(error.message) }
+  if (target.hasAttribute("data-open-sessions")) {
+    setSessionsOpen(true)
+    requestAnimationFrame(() => app.querySelector(".sessions-header [data-close-sessions]")?.focus())
+    return
+  }
+  if (target.hasAttribute("data-close-sessions")) {
+    setSessionsOpen(false)
+    return
+  }
+  if (target.hasAttribute("data-new-session")) {
+    await createAndOpenSession()
+    return
+  }
+  if (target.dataset.switchSession) {
+    await selectAndNavigate(state.routeInstanceId, target.dataset.switchSession)
     return
   }
   if (target.hasAttribute("data-open-changes")) {
@@ -1117,7 +1240,7 @@ app.addEventListener("submit", async (event) => {
 })
 
 window.addEventListener("hashchange", () => {
-  document.body.classList.remove("changes-open")
+  document.body.classList.remove("changes-open", "sessions-open")
   clearTimeout(state.refreshTimer)
   clearTimeout(state.changesTimer)
   const wasConversation = Boolean(state.routeSessionId)
@@ -1137,6 +1260,7 @@ window.addEventListener("hashchange", () => {
   state.changesSessionId = ""
   state.loadingChangesSession = ""
   state.changesOpen = false
+  state.sessionsOpen = false
   state.diffs.clear()
   state.diffErrors.clear()
   state.loadingDiffs.clear()

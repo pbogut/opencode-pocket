@@ -26,6 +26,7 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
   const sseClients = new Set()
   const projectDir = "/work/demo"
   const session = { id: "ses_1", title: "Demo agent", directory: projectDir, time: { updated: Date.now() } }
+  const createdSession = { id: "ses_created", title: "New session", directory: projectDir, time: { created: Date.now() } }
   let question = null
   let permission = null
 
@@ -35,6 +36,7 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
 
     if (url.pathname === "/global/health") return sendJson(res, { healthy: true, version: "test" })
     if (url.pathname === "/session" && req.method === "GET") return sendJson(res, [session])
+    if (url.pathname === "/session" && req.method === "POST") return sendJson(res, createdSession)
     if (url.pathname === "/session/status") return sendJson(res, { ses_1: { type: "busy" } })
     if (url.pathname === "/question" && req.method === "GET") return sendJson(res, question ? [question] : [])
     if (url.pathname === "/permission" && req.method === "GET") return sendJson(res, permission ? [permission] : [])
@@ -65,6 +67,9 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
       res.writeHead(204); return res.end()
     }
     if (url.pathname === "/api/session/ses_1/agent" && req.method === "POST") {
+      res.writeHead(204); return res.end()
+    }
+    if (url.pathname === "/tui/select-session" && req.method === "POST") {
       res.writeHead(204); return res.end()
     }
     if (url.pathname === "/question/que_1/reply" && req.method === "POST") {
@@ -140,6 +145,17 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
   const agentCall = calls.find((call) => call.path === "/api/session/ses_1/agent")
   assert.deepEqual(agentCall.body, { agent: "review" })
   assert.equal(new URLSearchParams(agentCall.search).get("directory"), projectDir)
+
+  const created = await bridge.createSession(projectDir)
+  assert.deepEqual(created, createdSession)
+  assert.equal(bridge.sessions.get(createdSession.id), created)
+  const createCall = calls.find((call) => call.path === "/session" && call.method === "POST")
+  assert.deepEqual(createCall.body, {})
+  assert.equal(new URLSearchParams(createCall.search).get("directory"), projectDir)
+  await bridge.selectSession(createdSession.id)
+  const selectCall = calls.find((call) => call.path === "/tui/select-session")
+  assert.deepEqual(selectCall.body, { sessionID: createdSession.id })
+  assert.equal(new URLSearchParams(selectCall.search).get("directory"), projectDir)
 
   question = {
     id: "que_1",

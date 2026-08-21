@@ -125,12 +125,13 @@ If the package is installed from npm, replace the file URL with `"opencode-pocke
 
 The plugin and Pocket use the same default token path. To override it, set `OPENCODE_POCKET_TOKEN_FILE` for both processes or add `"tokenFile"` to the plugin options. You may instead provide the token directly through `OPENCODE_POCKET_TOKEN` to both processes.
 
-Quit and restart OpenCode after changing `tui.json`; OpenCode loads TUI plugins only at startup. Start the TUI with `--port 0`. The plugin registers its loopback server directly with Pocket, so `--mdns` is not required.
+Quit and restart OpenCode after changing `tui.json`; OpenCode loads TUI plugins only at startup. Start the TUI with `--port 0`. The plugin registers its loopback server directly with Pocket, so `--mdns` is not required. If the TUI exposes only its internal URL, the plugin shows one warning and waits instead of sending invalid reports to Pocket.
 
 When synchronization is active:
 
 - the TUI-selected session is marked `In TUI`
 - opening a Pocket session selects it in that TUI
+- the conversation header opens the 10 newest root sessions and can create a session with OpenCode's defaults
 - TUI navigation updates Pocket only while Pocket is following that instance
 - opening an instance follows its current TUI session, or its session list when the TUI is home
 - background instances update their markers without taking over Pocket navigation
@@ -179,6 +180,7 @@ GET  /api/state
 GET  /api/events                                      SSE
 POST /api/refresh
 
+POST /api/instances/:instance/sessions
 GET  /api/instances/:instance/sessions/:session/messages
 POST /api/instances/:instance/sessions/:session/messages
 GET  /api/instances/:instance/sessions/:session/changes
