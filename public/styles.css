@@ -62,11 +62,11 @@ button { color: inherit; }
 .thought-detail { margin-top: 8px; border-left: 2px solid #754b3d; padding-left: 10px; color: #c9a89a; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
 .part-duration { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
 .tool-block { overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: #11141a; }
-.tool-block > summary { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px; }
-.tool-summary { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.tool-block > summary { min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 9px 10px; }
+.tool-summary { min-width: 0; flex: 1; display: flex; align-items: center; gap: 8px; }
 .tool-name { flex: none; border-radius: 6px; background: var(--surface-2); padding: 3px 6px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
 .tool-title { min-width: 0; overflow: hidden; color: #d9dce2; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.tool-meta { flex: none; display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
+.tool-meta { flex: none; display: flex; align-items: center; gap: 7px; margin-left: auto; color: var(--muted); font-size: 10px; }
 .tool-status { display: flex; align-items: center; gap: 5px; }
 .tool-block.running .tool-status, .tool-block.pending .tool-status { color: var(--accent); }
 .tool-block.running .tool-status::before, .tool-block.pending .tool-status::before { width: 6px; height: 6px; border-radius: 50%; background: currentColor; content: ""; animation: tool-pulse 1s ease-in-out infinite alternate; }
