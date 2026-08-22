@@ -399,19 +399,27 @@ function renderTool(message, part, index) {
   const toolState = part.state || {}
   const status = toolState.status || "pending"
   const input = toolState.input && typeof toolState.input === "object" ? toolState.input : {}
-  const command = typeof input.command === "string" ? input.command : Array.isArray(input.command) ? input.command.join(" ") : ""
+  const toolName = part.tool || part.name || "tool"
+  const isShell = toolName === "bash"
+  const isTask = toolName === "task"
+  const command = isShell
+    ? typeof input.command === "string" ? input.command : Array.isArray(input.command) ? input.command.join(" ") : ""
+    : ""
   const firstCommandLine = command.split("\n")[0]
-  const title = firstCommandLine ? `$ ${firstCommandLine}` : toolState.title || part.tool || part.name || "Tool"
+  const title = isTask
+    ? input.description || toolState.title || "Subagent task"
+    : firstCommandLine ? `$ ${firstCommandLine}` : toolState.title || toolName
   const duration = durationLabel(toolState.time)
   const key = partKey(message, part, index)
-  const inputText = command || (Object.keys(input).length ? detailText(input) : "")
+  const inputText = isTask ? input.prompt || "" : command || (Object.keys(input).length ? detailText(input) : "")
+  const inputLabel = isTask ? "Prompt" : command ? "Command" : "Input"
   const output = toolState.output ?? toolState.error ?? ""
   const outputLabel = toolState.error ? "Error" : "Output"
-  const body = `${inputText ? `<div class="tool-detail-label">${command ? "Command" : "Input"}</div><pre class="tool-detail">${esc(command ? `$ ${inputText}` : inputText)}</pre>` : ""}
+  const body = `${inputText ? `<div class="tool-detail-label">${inputLabel}</div><pre class="tool-detail">${esc(command ? `$ ${inputText}` : inputText)}</pre>` : ""}
     ${output ? `<div class="tool-detail-label">${outputLabel}</div><pre class="tool-detail ${toolState.error ? "error" : ""}">${esc(detailText(output))}</pre>` : `<div class="tool-empty">${status === "running" ? "Running…" : "No output"}</div>`}`
   return `<details class="tool-block ${esc(status)}" data-part-key="${esc(key)}" ${state.expandedParts.has(key) ? "open" : ""}>
     <summary>
-      <span class="tool-summary"><span class="tool-name">${esc(part.tool || part.name || "tool")}</span><span class="tool-title">${esc(title)}</span></span>
+      <span class="tool-summary"><span class="tool-name">${esc(toolName)}</span><span class="tool-title">${esc(title)}</span></span>
       <span class="tool-meta"><span class="tool-status">${esc(status)}</span>${duration ? `<span class="part-duration">${duration}</span>` : ""}</span>
     </summary>
     <div class="tool-body">${body}</div>
