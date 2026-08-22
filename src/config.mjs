@@ -16,6 +16,11 @@ export function loadConfig(env = process.env) {
     pushSubject: env.OPENCODE_POCKET_VAPID_SUBJECT || "mailto:opencode-pocket@localhost",
     pushVapidFile: env.OPENCODE_POCKET_VAPID_FILE || join(stateHome, "opencode-pocket", "push-vapid.json"),
     pushSubscriptionsFile: env.OPENCODE_POCKET_PUSH_SUBSCRIPTIONS_FILE || join(stateHome, "opencode-pocket", "push-subscriptions.json"),
+    notificationSettingsFile: env.OPENCODE_POCKET_NOTIFICATION_SETTINGS_FILE || join(stateHome, "opencode-pocket", "notification-settings.json"),
+    ntfyTopic: env.OPENCODE_POCKET_NTFY_TOPIC || "",
+    ntfyUrl: (env.OPENCODE_POCKET_NTFY_URL || "https://ntfy.sh").replace(/\/$/, ""),
+    ntfyToken: env.OPENCODE_POCKET_NTFY_TOKEN || "",
+    publicUrl: (env.OPENCODE_POCKET_PUBLIC_URL || "").replace(/\/$/, ""),
     host: env.HOST || "127.0.0.1",
     port: Number.parseInt(env.PORT || "8787", 10),
   }

@@ -196,7 +196,14 @@ body.sessions-open { overflow: hidden; }
 .notification-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--line); padding: 14px 14px 12px; }
 .notification-header h2 { margin: 0; font-size: 17px; }
 .notification-header p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
-.notification-content { display: grid; gap: 9px; padding: 12px 14px calc(18px + env(safe-area-inset-bottom)); }
+.notification-content { display: grid; gap: 12px; max-height: 72dvh; overflow-y: auto; padding: 12px 14px calc(18px + env(safe-area-inset-bottom)); }
+.notification-backend { display: grid; gap: 9px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); padding: 12px; }
+.notification-backend-header { display: flex; align-items: center; gap: 12px; }
+.notification-backend-header > span:first-child { min-width: 0; flex: 1; }
+.notification-backend-header strong, .notification-backend-header small { display: block; }
+.notification-backend-header strong { font-size: 14px; }
+.notification-backend-header small { margin-top: 3px; color: var(--muted); font-size: 11px; }
+.notification-choices { display: grid; gap: 7px; }
 .notification-choice { min-height: 62px; display: flex; align-items: center; gap: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); padding: 11px 13px; }
 .notification-choice span { min-width: 0; flex: 1; }
 .notification-choice strong, .notification-choice small { display: block; }

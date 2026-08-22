@@ -204,7 +204,7 @@ Keep Pocket and OpenCode bound to `127.0.0.1`, then expose Pocket with Tailscale
 
 After opening the HTTPS Pocket URL, install the PWA and open notification settings from the bell button. Enable notifications for that device, then choose whether to receive blockers, completed tasks, or both. Blockers cover questions and permission requests. A task is complete when its session moves from working or retrying to idle.
 
-Pocket uses Web Push, so notifications work after the page or installed PWA closes. Pocket suppresses system notifications while one of its windows is visible. Notification text is generic on the lock screen; tapping it opens the affected session. Each subscribed browser stores its own choices on the Pocket server.
+Pocket supports Web Push and ntfy as independent notification destinations. Each browser stores its own blocker and completion choices. Configuring an ntfy topic makes that destination available; enable it and choose its events in the notification panel. This lets a phone use ntfy while a laptop uses browser notifications. Pocket suppresses Web Push while one of its windows is visible. Notification text is generic on the lock screen; tapping it opens the affected session.
 
 The service worker caches the application shell for reloads with a network-first strategy and handles push delivery. API responses are never cached, and Pocket does not provide offline OpenCode control or background synchronization.
 
@@ -251,6 +251,11 @@ The service and direct launcher both load `~/.config/opencode-pocket/env`. The p
 | `OPENCODE_POCKET_VAPID_PRIVATE_KEY` | generated | Optional explicit VAPID private key; set both keys together |
 | `OPENCODE_POCKET_VAPID_FILE` | XDG state path | Generated Web Push VAPID key file |
 | `OPENCODE_POCKET_PUSH_SUBSCRIPTIONS_FILE` | XDG state path | Browser push subscriptions and preferences |
+| `OPENCODE_POCKET_NTFY_TOPIC` | empty | Enable the ntfy destination with this topic |
+| `OPENCODE_POCKET_NTFY_URL` | `https://ntfy.sh` | ntfy server URL |
+| `OPENCODE_POCKET_NTFY_TOKEN` | empty | Optional ntfy bearer token |
+| `OPENCODE_POCKET_PUBLIC_URL` | empty | External Pocket origin used for notification session links |
+| `OPENCODE_POCKET_NOTIFICATION_SETTINGS_FILE` | XDG state path | Global notification destination preferences |
 | `OPENCODE_POCKET_CONFIG` | empty | Explicit launcher environment file; otherwise use the selected XDG profile |
 | `OPENCODE_POCKET_PROFILE` | empty | Load `env.NAME` instead of `env` |
 | `XDG_STATE_HOME` | `~/.local/state` | Base directory for the default plugin token path |
@@ -274,6 +279,7 @@ POST /api/refresh
 GET  /api/notifications
 PUT  /api/notifications/subscription
 DELETE /api/notifications/subscription
+PUT  /api/notifications/ntfy
 
 POST /api/instances/:instance/sessions
 GET  /api/instances/:instance/sessions/:session/messages

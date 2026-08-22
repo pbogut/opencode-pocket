@@ -40,13 +40,17 @@ async function readJson(file, fallback) {
   }
 }
 
-export class PushNotifications {
+export class Notifications {
   constructor(config, options = {}) {
     this.config = config
     this.webPush = options.webPush || webPush
+    this.fetch = options.fetch || fetch
+    this.logger = options.logger || console
     this.subscriptions = new Map()
     this.notifiedBlockers = new Set()
     this.writePromise = Promise.resolve()
+    this.ntfyWritePromise = Promise.resolve()
+    this.ntfySettings = { enabled: false, preferences: { ...DEFAULT_NOTIFICATION_PREFERENCES } }
   }
 
   async start() {
@@ -70,6 +74,24 @@ export class PushNotifications {
         preferences: preferences(record.preferences),
       })
     }
+
+    const ntfySettings = await readJson(this.config.notificationSettingsFile, null)
+    if (ntfySettings && typeof ntfySettings === "object") {
+      this.ntfySettings = {
+        enabled: typeof ntfySettings.ntfy?.enabled === "boolean" ? ntfySettings.ntfy.enabled : false,
+        preferences: preferences(ntfySettings.ntfy?.preferences),
+      }
+    }
+    if (this.config.ntfyTopic && !/^[-_A-Za-z0-9]{1,64}$/.test(this.config.ntfyTopic)) {
+      throw new Error("OPENCODE_POCKET_NTFY_TOPIC must contain 1-64 letters, numbers, dashes, or underscores")
+    }
+    for (const [name, value] of [["OPENCODE_POCKET_NTFY_URL", this.config.ntfyUrl], ["OPENCODE_POCKET_PUBLIC_URL", this.config.publicUrl]]) {
+      if (!value) continue
+      let url
+      try { url = new URL(value) } catch { throw new Error(`${name} must be a valid HTTP or HTTPS URL`) }
+      if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`${name} must be a valid HTTP or HTTPS URL`)
+      if (url.username || url.password) throw new Error(`${name} must not include credentials`)
+    }
   }
 
   publicConfig() {
@@ -77,7 +99,30 @@ export class PushNotifications {
       supported: true,
       publicKey: this.keys.publicKey,
       defaults: DEFAULT_NOTIFICATION_PREFERENCES,
+      ntfy: {
+        available: Boolean(this.config.ntfyTopic),
+        enabled: Boolean(this.config.ntfyTopic && this.ntfySettings.enabled),
+        preferences: this.ntfySettings.preferences,
+      },
     }
+  }
+
+  async updateNtfy(value) {
+    if (!this.config.ntfyTopic) {
+      const error = new Error("ntfy is not configured")
+      error.statusCode = 400
+      throw error
+    }
+    this.ntfyWritePromise = this.ntfyWritePromise.catch(() => {}).then(async () => {
+      const next = {
+        enabled: typeof value?.enabled === "boolean" ? value.enabled : this.ntfySettings.enabled,
+        preferences: preferences(value?.preferences, this.ntfySettings.preferences),
+      }
+      await privateJson(this.config.notificationSettingsFile, { ntfy: next })
+      this.ntfySettings = next
+      return this.publicConfig().ntfy
+    })
+    return this.ntfyWritePromise
   }
 
   async upsert(subscription, selectedPreferences) {
@@ -142,11 +187,21 @@ export class PushNotifications {
   }
 
   eventUrl(event) {
-    if (!event.instanceId || !event.sessionId) return "/#/"
-    return `/#/instance/${encodeURIComponent(event.instanceId)}/session/${encodeURIComponent(event.sessionId)}`
+    if (!event.instanceId || !event.sessionId) return "/?notification=1#/"
+    return `/?notification=1#/instance/${encodeURIComponent(event.instanceId)}/session/${encodeURIComponent(event.sessionId)}`
   }
 
   async send(kind, payload) {
+    const deliveries = await Promise.allSettled([
+      this.sendWebPush(kind, payload),
+      this.sendNtfy(kind, payload),
+    ])
+    for (const result of deliveries) {
+      if (result.status === "rejected") this.logger.error("Notification delivery failed", result.reason)
+    }
+  }
+
+  async sendWebPush(kind, payload) {
     const expired = []
     await Promise.all([...this.subscriptions.values()].map(async (subscription) => {
       if (!subscription.preferences[kind]) return
@@ -157,11 +212,34 @@ export class PushNotifications {
         })
       } catch (error) {
         if (error.statusCode === 404 || error.statusCode === 410) expired.push(subscription.endpoint)
-        else console.error("Web Push delivery failed", error)
+        else this.logger.error("Web Push delivery failed", error)
       }
     }))
     if (!expired.length) return
     for (const endpoint of expired) this.subscriptions.delete(endpoint)
     await this.persist()
+  }
+
+  async sendNtfy(kind, payload) {
+    if (!this.config.ntfyTopic || !this.ntfySettings.enabled || !this.ntfySettings.preferences[kind]) return
+    const click = this.config.publicUrl ? new URL(payload.url, `${this.config.publicUrl}/`).href : undefined
+    const response = await this.fetch(this.config.ntfyUrl, {
+      method: "POST",
+      signal: AbortSignal.timeout(10_000),
+      headers: {
+        "Content-Type": "application/json",
+        ...(this.config.ntfyToken ? { Authorization: `Bearer ${this.config.ntfyToken}` } : {}),
+      },
+      body: JSON.stringify({
+        topic: this.config.ntfyTopic,
+        title: payload.title,
+        message: payload.body,
+        priority: kind === "blockers" ? 5 : 4,
+        ...(click ? { click } : {}),
+      }),
+    })
+    if (response.ok) return
+    const detail = await response.text().catch(() => "")
+    throw new Error(`ntfy delivery failed: ${response.status}${detail ? ` ${detail}` : ""}`)
   }
 }

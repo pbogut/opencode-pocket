@@ -5,6 +5,8 @@ const BOTTOM_THRESHOLD = 80
 const DEFAULT_NOTIFICATION_PREFERENCES = { blockers: true, completed: true }
 const savedDrafts = loadDrafts()
 const initialRoute = routeFromHash()
+const notificationRoute = new URLSearchParams(location.search).get("notification") === "1"
+if (notificationRoute) history.replaceState(null, "", `${location.pathname}${location.hash}`)
 
 const state = {
   snapshot: { connected: false, instances: [], sessions: [], questions: [], permissions: [] },
@@ -45,13 +47,14 @@ const state = {
   attentionCollapsed: false,
   followMessages: true,
   followInstanceId: "",
-  directFollowInstanceId: initialRoute.sessionId ? initialRoute.instanceId : "",
+  directFollowInstanceId: initialRoute.sessionId && !notificationRoute ? initialRoute.instanceId : "",
   pendingTuiSelection: null,
   expandedParts: new Set(),
   notificationsOpen: false,
   notificationConfig: null,
   notificationSubscription: null,
   notificationPreferences: { ...DEFAULT_NOTIFICATION_PREFERENCES },
+  ntfySettings: { available: false, enabled: false, preferences: { ...DEFAULT_NOTIFICATION_PREFERENCES } },
   notificationBusy: false,
 }
 
@@ -675,7 +678,7 @@ function renderList() {
         <h1>Agents</h1>
         <div class="connection"><span class="dot ${state.snapshot.connected ? "connected" : ""}"></span>${state.snapshot.connected ? "live" : "reconnecting"}</div>
       </div>
-      <button class="icon-button notification-button${state.notificationSubscription ? " enabled" : ""}" data-notifications aria-label="Notification settings" title="Notification settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg></button>
+      <button class="icon-button notification-button${state.notificationSubscription || state.ntfySettings.enabled ? " enabled" : ""}" data-notifications aria-label="Notification settings" title="Notification settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg></button>
       <button class="icon-button refresh-button" data-refresh aria-label="Refresh agents" title="Refresh"><span aria-hidden="true">↻</span></button>
     </header>
     ${renderAgentList(instances)}
@@ -692,32 +695,40 @@ function renderNotificationSettings() {
   if (!state.notificationsOpen) return ""
   const subscribed = Boolean(state.notificationSubscription)
   const denied = "Notification" in window && Notification.permission === "denied"
-  const status = state.notificationBusy
-    ? "Checking this device…"
-    : !notificationSupport()
-      ? "Push notifications need an installed PWA or a supported browser on HTTPS."
-      : denied
-        ? "Notifications are blocked in browser settings for this site."
-        : subscribed
-          ? "This device will receive notifications when Pocket is closed."
-          : "Enable notifications on this device, then choose what should interrupt you."
+  const browserStatus = !notificationSupport()
+    ? "Requires a supported browser on HTTPS."
+    : denied
+      ? "Blocked in browser settings for this site."
+      : subscribed ? "Enabled on this browser." : "Disabled on this browser."
+  const ntfy = state.ntfySettings
+  const choices = (backend, selected, disabled) => `<div class="notification-choices">
+    <label class="notification-choice">
+      <span><strong>Needs input</strong><small>Questions and permission requests</small></span>
+      <input type="checkbox" data-${backend}-notification-preference="blockers" ${selected.blockers ? "checked" : ""} ${disabled ? "disabled" : ""}>
+    </label>
+    <label class="notification-choice">
+      <span><strong>Task finished</strong><small>When an agent stops working</small></span>
+      <input type="checkbox" data-${backend}-notification-preference="completed" ${selected.completed ? "checked" : ""} ${disabled ? "disabled" : ""}>
+    </label>
+  </div>`
   return `<div class="notification-overlay">
     <button type="button" class="notification-backdrop" data-close-notifications aria-label="Close notification settings"></button>
     <section class="notification-drawer" role="dialog" aria-modal="true" aria-labelledby="notification-title">
       <header class="notification-header">
-        <div><h2 id="notification-title">Notifications</h2><p>${esc(status)}</p></div>
+        <div><h2 id="notification-title">Notifications</h2><p>${state.notificationBusy ? "Saving…" : "Configure each destination independently."}</p></div>
         <button type="button" class="icon-button" data-close-notifications aria-label="Close notification settings">×</button>
       </header>
       <div class="notification-content">
-        <label class="notification-choice">
-          <span><strong>Needs input</strong><small>Questions and permission requests</small></span>
-          <input type="checkbox" data-notification-preference="blockers" ${state.notificationPreferences.blockers ? "checked" : ""} ${!subscribed || state.notificationBusy ? "disabled" : ""}>
-        </label>
-        <label class="notification-choice">
-          <span><strong>Task finished</strong><small>When an agent stops working</small></span>
-          <input type="checkbox" data-notification-preference="completed" ${state.notificationPreferences.completed ? "checked" : ""} ${!subscribed || state.notificationBusy ? "disabled" : ""}>
-        </label>
-        <button type="button" class="button ${subscribed ? "danger" : "primary"} notification-toggle" data-${subscribed ? "disable" : "enable"}-notifications ${state.notificationBusy || denied || !notificationSupport() ? "disabled" : ""}>${subscribed ? "Disable on this device" : "Enable on this device"}</button>
+        <section class="notification-backend">
+          <div class="notification-backend-header"><span><strong>Browser on this device</strong><small>${esc(browserStatus)}</small></span><span class="badge ${subscribed ? "idle" : ""}">${subscribed ? "on" : "off"}</span></div>
+          ${choices("browser", state.notificationPreferences, !subscribed || state.notificationBusy)}
+          <button type="button" class="button ${subscribed ? "danger" : "primary"} notification-toggle" data-${subscribed ? "disable" : "enable"}-notifications ${state.notificationBusy || denied || !notificationSupport() ? "disabled" : ""}>${subscribed ? "Disable on this device" : "Enable on this device"}</button>
+        </section>
+        ${ntfy.available ? `<section class="notification-backend">
+          <div class="notification-backend-header"><span><strong>ntfy</strong><small>Shared destination configured on the Pocket server.</small></span><span class="badge ${ntfy.enabled ? "idle" : ""}">${ntfy.enabled ? "on" : "off"}</span></div>
+          ${choices("ntfy", ntfy.preferences, !ntfy.enabled || state.notificationBusy)}
+          <button type="button" class="button ${ntfy.enabled ? "danger" : "primary"} notification-toggle" data-toggle-ntfy ${state.notificationBusy ? "disabled" : ""}>${ntfy.enabled ? "Disable ntfy" : "Enable ntfy"}</button>
+        </section>` : ""}
       </div>
     </section>
   </div>`
@@ -737,29 +748,38 @@ function subscriptionUsesKey(subscription, publicKey) {
   return actual.length === expected.length && actual.every((value, index) => value === expected[index])
 }
 
+let notificationSettingsPromise = null
 async function loadNotificationSettings() {
-  if (!notificationSupport()) return
+  if (notificationSettingsPromise) return notificationSettingsPromise
+  notificationSettingsPromise = loadNotificationSettingsOnce()
+  try { return await notificationSettingsPromise } finally { notificationSettingsPromise = null }
+}
+
+async function loadNotificationSettingsOnce() {
   state.notificationBusy = true
   render()
   try {
     state.notificationConfig = await api("/api/notifications")
-    const registration = await navigator.serviceWorker.ready
-    let subscription = await registration.pushManager.getSubscription()
-    if (subscription && !subscriptionUsesKey(subscription, state.notificationConfig.publicKey)) {
-      await api("/api/notifications/subscription", {
-        method: "DELETE",
-        body: JSON.stringify({ endpoint: subscription.endpoint }),
-      }).catch(() => {})
-      await subscription.unsubscribe()
-      subscription = null
-    }
-    state.notificationSubscription = subscription
-    if (subscription) {
-      const result = await api("/api/notifications/subscription", {
-        method: "PUT",
-        body: JSON.stringify({ subscription }),
-      })
-      state.notificationPreferences = result.preferences
+    state.ntfySettings = state.notificationConfig.ntfy || state.ntfySettings
+    if (notificationSupport()) {
+      const registration = await navigator.serviceWorker.ready
+      let subscription = await registration.pushManager.getSubscription()
+      if (subscription && !subscriptionUsesKey(subscription, state.notificationConfig.publicKey)) {
+        await api("/api/notifications/subscription", {
+          method: "DELETE",
+          body: JSON.stringify({ endpoint: subscription.endpoint }),
+        }).catch(() => {})
+        await subscription.unsubscribe()
+        subscription = null
+      }
+      state.notificationSubscription = subscription
+      if (subscription) {
+        const result = await api("/api/notifications/subscription", {
+          method: "PUT",
+          body: JSON.stringify({ subscription }),
+        })
+        state.notificationPreferences = result.preferences
+      }
     }
   } catch (error) {
     showToast(error.message)
@@ -830,6 +850,23 @@ async function saveNotificationPreferences() {
       body: JSON.stringify({ subscription, preferences: state.notificationPreferences }),
     })
     state.notificationPreferences = result.preferences
+  } catch (error) {
+    showToast(error.message)
+  } finally {
+    state.notificationBusy = false
+  }
+  render()
+}
+
+async function saveNtfySettings(update) {
+  if (!state.ntfySettings.available) return
+  state.notificationBusy = true
+  render()
+  try {
+    state.ntfySettings = await api("/api/notifications/ntfy", {
+      method: "PUT",
+      body: JSON.stringify(update),
+    })
   } catch (error) {
     showToast(error.message)
   } finally {
@@ -1568,10 +1605,15 @@ app.addEventListener("keydown", (event) => {
 })
 
 app.addEventListener("change", (event) => {
-  const notificationPreference = event.target.closest("[data-notification-preference]")
-  if (notificationPreference) {
-    state.notificationPreferences[notificationPreference.dataset.notificationPreference] = notificationPreference.checked
+  const browserPreference = event.target.closest("[data-browser-notification-preference]")
+  if (browserPreference) {
+    state.notificationPreferences[browserPreference.dataset.browserNotificationPreference] = browserPreference.checked
     saveNotificationPreferences()
+    return
+  }
+  const ntfyPreference = event.target.closest("[data-ntfy-notification-preference]")
+  if (ntfyPreference) {
+    saveNtfySettings({ preferences: { [ntfyPreference.dataset.ntfyNotificationPreference]: ntfyPreference.checked } })
     return
   }
   const select = event.target.closest("[data-agent-select]")
@@ -1637,6 +1679,10 @@ app.addEventListener("click", async (event) => {
   }
   if (target.hasAttribute("data-disable-notifications")) {
     await disableNotifications()
+    return
+  }
+  if (target.hasAttribute("data-toggle-ntfy")) {
+    await saveNtfySettings({ enabled: !state.ntfySettings.enabled })
     return
   }
   if (target.hasAttribute("data-open-sessions")) {

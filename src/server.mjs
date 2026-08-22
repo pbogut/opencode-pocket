@@ -7,13 +7,13 @@ import { fileURLToPath } from "node:url"
 import { loadConfig } from "./config.mjs"
 import { InstanceManager } from "./instances.mjs"
 import { loadPluginToken } from "./plugin-token.mjs"
-import { PushNotifications } from "./push-notifications.mjs"
+import { Notifications } from "./notifications.mjs"
 
 const config = loadConfig()
 const pluginToken = await loadPluginToken(config)
 const manager = new InstanceManager(config)
-const pushNotifications = new PushNotifications(config)
-await pushNotifications.start()
+const notifications = new Notifications(config)
+await notifications.start()
 const publicDir = fileURLToPath(new URL("../public/", import.meta.url))
 const sseClients = new Set()
 const devMode = process.argv.includes("--dev")
@@ -67,7 +67,7 @@ if (devMode) {
 manager.on("state", (state) => broadcast("state", state))
 manager.on("event", (event) => {
   broadcast("agent-event", event)
-  pushNotifications.handleEvent(event, manager.snapshot()).catch((error) => console.error("Notification handling failed", error))
+  notifications.handleEvent(event, manager.snapshot()).catch((error) => console.error("Notification handling failed", error))
 })
 manager.on("tui", (event) => broadcast("tui-state", event))
 manager.on("error", (error) => console.error("OpenCode discovery failed", error))
@@ -120,17 +120,21 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, manager.snapshot())
     }
     if (req.method === "GET" && path === "/api/notifications") {
-      return json(res, 200, pushNotifications.publicConfig())
+      return json(res, 200, notifications.publicConfig())
     }
     if (req.method === "PUT" && path === "/api/notifications/subscription") {
       const input = await bodyJson(req)
-      const subscription = await pushNotifications.upsert(input.subscription, input.preferences)
+      const subscription = await notifications.upsert(input.subscription, input.preferences)
       return json(res, 200, { preferences: subscription.preferences })
     }
     if (req.method === "DELETE" && path === "/api/notifications/subscription") {
       const input = await bodyJson(req)
-      await pushNotifications.remove(input.endpoint)
+      await notifications.remove(input.endpoint)
       return json(res, 200, { ok: true })
+    }
+    if (req.method === "PUT" && path === "/api/notifications/ntfy") {
+      const input = await bodyJson(req)
+      return json(res, 200, await notifications.updateNtfy(input))
     }
     if ((req.method === "POST" || req.method === "DELETE") && path === "/api/plugin/tui-state") {
       if (!authorizedPlugin(req)) return json(res, 401, { error: "Unauthorized" })
