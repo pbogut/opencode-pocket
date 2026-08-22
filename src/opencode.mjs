@@ -106,6 +106,7 @@ export class OpenCodeBridge extends EventEmitter {
     this.statuses = new Map()
     this.questions = new Map()
     this.permissions = new Map()
+    this.suppressedCompletions = new Set()
     this.running = false
     this.abortController = null
     this.connected = false
@@ -235,6 +236,7 @@ export class OpenCodeBridge extends EventEmitter {
   handleEvent(raw) {
     this.lastEventAt = Date.now()
     const event = normalizeEvent(raw)
+    const previousStatus = event.sessionId ? this.statuses.get(event.sessionId) : null
     const sessionLifecycle = event.type === "session.created" || event.type === "session.updated" || event.type === "session.deleted"
     if (event.sessionId && !this.sessions.has(event.sessionId) && !sessionLifecycle) {
       // Session metadata is authoritative and cheap enough to refresh when a previously unseen session appears.
@@ -248,6 +250,7 @@ export class OpenCodeBridge extends EventEmitter {
     } else if (event.type === "session.deleted" && event.sessionId) {
       this.sessions.delete(event.sessionId)
       this.statuses.delete(event.sessionId)
+      this.suppressedCompletions.delete(event.sessionId)
       for (const [id, item] of this.questions) if (sessionId(item) === event.sessionId) this.questions.delete(id)
       for (const [id, item] of this.permissions) if (sessionId(item) === event.sessionId) this.permissions.delete(id)
     } else if (event.type === "question.asked" && event.requestId) {
@@ -260,10 +263,25 @@ export class OpenCodeBridge extends EventEmitter {
       this.permissions.delete(event.requestId)
     } else if (event.type === "session.status" && event.sessionId) {
       if (event.status?.type === "idle") this.statuses.delete(event.sessionId)
-      else this.statuses.set(event.sessionId, event.status)
+      else {
+        if (!previousStatus && ["busy", "retry"].includes(event.status?.type)) this.suppressedCompletions.delete(event.sessionId)
+        this.statuses.set(event.sessionId, event.status)
+      }
+    } else if (event.type === "session.error" && event.sessionId) {
+      this.suppressedCompletions.add(event.sessionId)
     }
 
     this.emit("event", event)
+    const completionSuppressed = this.suppressedCompletions.has(event.sessionId)
+    if (event.type === "session.status" && event.status?.type === "idle") this.suppressedCompletions.delete(event.sessionId)
+    if (event.type === "session.status" && event.status?.type === "idle" && ["busy", "retry"].includes(previousStatus?.type) && !completionSuppressed) {
+      this.emit("event", {
+        type: "session.completed",
+        sessionId: event.sessionId,
+        previousStatus,
+        completedAt: this.lastEventAt,
+      })
+    }
     this.emitState()
   }
 
@@ -422,9 +440,15 @@ export class OpenCodeBridge extends EventEmitter {
   }
 
   async abortSession(sid) {
-    return this.request(this.pathForSession(`/session/${encodeURIComponent(sid)}/abort`, sid), {
-      method: "POST",
-    })
+    this.suppressedCompletions.add(sid)
+    try {
+      return await this.request(this.pathForSession(`/session/${encodeURIComponent(sid)}/abort`, sid), {
+        method: "POST",
+      })
+    } catch (error) {
+      this.suppressedCompletions.delete(sid)
+      throw error
+    }
   }
 
   async replyQuestion(id, answers) {

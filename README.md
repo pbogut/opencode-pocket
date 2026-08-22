@@ -202,11 +202,11 @@ OpenCode instances
 
 Keep Pocket and OpenCode bound to `127.0.0.1`, then expose Pocket with Tailscale Serve. This is the recommended architecture and avoids exposing OpenCode's powerful API directly to the LAN or internet. A manually configured `OPENCODE_URL` is not restricted to loopback, so secure any remote OpenCode server separately.
 
-After opening the HTTPS Pocket URL in Chrome on Android, use "Add to Home screen" or "Install app". Tap the bell button once to grant browser notifications.
+After opening the HTTPS Pocket URL, install the PWA and open notification settings from the bell button. Enable notifications for that device, then choose whether to receive blockers, completed tasks, or both. Blockers cover questions and permission requests. A task is complete when its session moves from working or retrying to idle.
 
-Notifications are sent only for questions and permission requests, only while Pocket remains loaded but is not visible. Pocket does not currently use Web Push, so it cannot notify after the page or installed PWA has been fully closed. Browser support for page-level notifications varies on mobile.
+Pocket uses Web Push, so notifications work after the page or installed PWA closes. Pocket suppresses system notifications while one of its windows is visible. Notification text is generic on the lock screen; tapping it opens the affected session. Each subscribed browser stores its own choices on the Pocket server.
 
-The service worker caches the application shell for reloads with a network-first strategy. API responses are never cached, and Pocket does not provide offline OpenCode control, background synchronization, or background push delivery.
+The service worker caches the application shell for reloads with a network-first strategy and handles push delivery. API responses are never cached, and Pocket does not provide offline OpenCode control or background synchronization.
 
 ## Arch Linux Package
 
@@ -246,6 +246,11 @@ The service and direct launcher both load `~/.config/opencode-pocket/env`. The p
 | `OPENCODE_DIRECTORY` | empty | Global directory default/fallback for OpenCode requests |
 | `OPENCODE_POCKET_TOKEN` | empty | Explicit TUI plugin bearer token |
 | `OPENCODE_POCKET_TOKEN_FILE` | XDG state path | Shared TUI plugin token file |
+| `OPENCODE_POCKET_VAPID_SUBJECT` | `mailto:opencode-pocket@localhost` | Web Push VAPID contact subject |
+| `OPENCODE_POCKET_VAPID_PUBLIC_KEY` | generated | Optional explicit VAPID public key; set both keys together |
+| `OPENCODE_POCKET_VAPID_PRIVATE_KEY` | generated | Optional explicit VAPID private key; set both keys together |
+| `OPENCODE_POCKET_VAPID_FILE` | XDG state path | Generated Web Push VAPID key file |
+| `OPENCODE_POCKET_PUSH_SUBSCRIPTIONS_FILE` | XDG state path | Browser push subscriptions and preferences |
 | `OPENCODE_POCKET_CONFIG` | empty | Explicit launcher environment file; otherwise use the selected XDG profile |
 | `OPENCODE_POCKET_PROFILE` | empty | Load `env.NAME` instead of `env` |
 | `XDG_STATE_HOME` | `~/.local/state` | Base directory for the default plugin token path |
@@ -266,6 +271,9 @@ GET  /api/health
 GET  /api/state
 GET  /api/events                                      SSE
 POST /api/refresh
+GET  /api/notifications
+PUT  /api/notifications/subscription
+DELETE /api/notifications/subscription
 
 POST /api/instances/:instance/sessions
 GET  /api/instances/:instance/sessions/:session/messages
@@ -310,7 +318,6 @@ Some OpenCode 1.17.x builds cannot reliably resolve permissions created by an in
 ## Deliberately not in v0.1
 
 - Herdr metadata enrichment
-- Web Push when the PWA is fully closed
 - authentication on Pocket's browser-facing UI
 - terminal fallback
 - todos

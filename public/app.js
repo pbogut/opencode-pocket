@@ -2,6 +2,7 @@ const app = document.querySelector("#app")
 
 const DRAFTS_KEY = "opencode-pocket-drafts-v1"
 const BOTTOM_THRESHOLD = 80
+const DEFAULT_NOTIFICATION_PREFERENCES = { blockers: true, completed: true }
 const savedDrafts = loadDrafts()
 const initialRoute = routeFromHash()
 
@@ -47,6 +48,11 @@ const state = {
   directFollowInstanceId: initialRoute.sessionId ? initialRoute.instanceId : "",
   pendingTuiSelection: null,
   expandedParts: new Set(),
+  notificationsOpen: false,
+  notificationConfig: null,
+  notificationSubscription: null,
+  notificationPreferences: { ...DEFAULT_NOTIFICATION_PREFERENCES },
+  notificationBusy: false,
 }
 
 function draftEntries(value) {
@@ -669,12 +675,167 @@ function renderList() {
         <h1>Agents</h1>
         <div class="connection"><span class="dot ${state.snapshot.connected ? "connected" : ""}"></span>${state.snapshot.connected ? "live" : "reconnecting"}</div>
       </div>
-      <button class="icon-button" data-notifications title="Enable notifications">🔔</button>
+      <button class="icon-button notification-button${state.notificationSubscription ? " enabled" : ""}" data-notifications aria-label="Notification settings" title="Notification settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg></button>
       <button class="icon-button refresh-button" data-refresh aria-label="Refresh agents" title="Refresh"><span aria-hidden="true">↻</span></button>
     </header>
     ${renderAgentList(instances)}
+    ${renderNotificationSettings()}
     ${state.toast ? `<div class="toast">${esc(state.toast)}</div>` : ""}
   </div>`
+}
+
+function notificationSupport() {
+  return window.isSecureContext && "Notification" in window && "serviceWorker" in navigator && "PushManager" in window
+}
+
+function renderNotificationSettings() {
+  if (!state.notificationsOpen) return ""
+  const subscribed = Boolean(state.notificationSubscription)
+  const denied = "Notification" in window && Notification.permission === "denied"
+  const status = state.notificationBusy
+    ? "Checking this device…"
+    : !notificationSupport()
+      ? "Push notifications need an installed PWA or a supported browser on HTTPS."
+      : denied
+        ? "Notifications are blocked in browser settings for this site."
+        : subscribed
+          ? "This device will receive notifications when Pocket is closed."
+          : "Enable notifications on this device, then choose what should interrupt you."
+  return `<div class="notification-overlay">
+    <button type="button" class="notification-backdrop" data-close-notifications aria-label="Close notification settings"></button>
+    <section class="notification-drawer" role="dialog" aria-modal="true" aria-labelledby="notification-title">
+      <header class="notification-header">
+        <div><h2 id="notification-title">Notifications</h2><p>${esc(status)}</p></div>
+        <button type="button" class="icon-button" data-close-notifications aria-label="Close notification settings">×</button>
+      </header>
+      <div class="notification-content">
+        <label class="notification-choice">
+          <span><strong>Needs input</strong><small>Questions and permission requests</small></span>
+          <input type="checkbox" data-notification-preference="blockers" ${state.notificationPreferences.blockers ? "checked" : ""} ${!subscribed || state.notificationBusy ? "disabled" : ""}>
+        </label>
+        <label class="notification-choice">
+          <span><strong>Task finished</strong><small>When an agent stops working</small></span>
+          <input type="checkbox" data-notification-preference="completed" ${state.notificationPreferences.completed ? "checked" : ""} ${!subscribed || state.notificationBusy ? "disabled" : ""}>
+        </label>
+        <button type="button" class="button ${subscribed ? "danger" : "primary"} notification-toggle" data-${subscribed ? "disable" : "enable"}-notifications ${state.notificationBusy || denied || !notificationSupport() ? "disabled" : ""}>${subscribed ? "Disable on this device" : "Enable on this device"}</button>
+      </div>
+    </section>
+  </div>`
+}
+
+function applicationServerKey(value) {
+  const padding = "=".repeat((4 - value.length % 4) % 4)
+  const binary = atob((value + padding).replace(/-/g, "+").replace(/_/g, "/"))
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0))
+}
+
+function subscriptionUsesKey(subscription, publicKey) {
+  const current = subscription.options?.applicationServerKey
+  if (!current) return true
+  const expected = applicationServerKey(publicKey)
+  const actual = new Uint8Array(current)
+  return actual.length === expected.length && actual.every((value, index) => value === expected[index])
+}
+
+async function loadNotificationSettings() {
+  if (!notificationSupport()) return
+  state.notificationBusy = true
+  render()
+  try {
+    state.notificationConfig = await api("/api/notifications")
+    const registration = await navigator.serviceWorker.ready
+    let subscription = await registration.pushManager.getSubscription()
+    if (subscription && !subscriptionUsesKey(subscription, state.notificationConfig.publicKey)) {
+      await api("/api/notifications/subscription", {
+        method: "DELETE",
+        body: JSON.stringify({ endpoint: subscription.endpoint }),
+      }).catch(() => {})
+      await subscription.unsubscribe()
+      subscription = null
+    }
+    state.notificationSubscription = subscription
+    if (subscription) {
+      const result = await api("/api/notifications/subscription", {
+        method: "PUT",
+        body: JSON.stringify({ subscription }),
+      })
+      state.notificationPreferences = result.preferences
+    }
+  } catch (error) {
+    showToast(error.message)
+  } finally {
+    state.notificationBusy = false
+    render()
+  }
+}
+
+async function enableNotifications() {
+  state.notificationBusy = true
+  render()
+  try {
+    const config = state.notificationConfig || await api("/api/notifications")
+    state.notificationConfig = config
+    const permission = await Notification.requestPermission()
+    if (permission !== "granted") throw new Error(`Notifications are ${permission}`)
+    const registration = await navigator.serviceWorker.ready
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: applicationServerKey(config.publicKey),
+    })
+    const result = await api("/api/notifications/subscription", {
+      method: "PUT",
+      body: JSON.stringify({ subscription, preferences: state.notificationPreferences }),
+    })
+    state.notificationSubscription = subscription
+    state.notificationPreferences = result.preferences
+    showToast("Notifications enabled")
+  } catch (error) {
+    showToast(error.message)
+  } finally {
+    state.notificationBusy = false
+    render()
+  }
+}
+
+async function disableNotifications() {
+  const subscription = state.notificationSubscription
+  if (!subscription) return
+  state.notificationBusy = true
+  render()
+  try {
+    const unsubscribed = await subscription.unsubscribe()
+    if (!unsubscribed) throw new Error("The browser could not remove this subscription")
+    state.notificationSubscription = null
+    await api("/api/notifications/subscription", {
+      method: "DELETE",
+      body: JSON.stringify({ endpoint: subscription.endpoint }),
+    })
+    showToast("Notifications disabled")
+  } catch (error) {
+    showToast(error.message)
+  } finally {
+    state.notificationBusy = false
+    render()
+  }
+}
+
+async function saveNotificationPreferences() {
+  const subscription = state.notificationSubscription
+  if (!subscription) return
+  state.notificationBusy = true
+  render()
+  try {
+    const result = await api("/api/notifications/subscription", {
+      method: "PUT",
+      body: JSON.stringify({ subscription, preferences: state.notificationPreferences }),
+    })
+    state.notificationPreferences = result.preferences
+  } catch (error) {
+    showToast(error.message)
+  } finally {
+    state.notificationBusy = false
+  }
+  render()
 }
 
 function renderConversationShell() {
@@ -1407,6 +1568,12 @@ app.addEventListener("keydown", (event) => {
 })
 
 app.addEventListener("change", (event) => {
+  const notificationPreference = event.target.closest("[data-notification-preference]")
+  if (notificationPreference) {
+    state.notificationPreferences[notificationPreference.dataset.notificationPreference] = notificationPreference.checked
+    saveNotificationPreferences()
+    return
+  }
   const select = event.target.closest("[data-agent-select]")
   if (!select || !select.value) return
   switchAgent(select.value)
@@ -1454,9 +1621,22 @@ app.addEventListener("click", async (event) => {
     return
   }
   if (target.hasAttribute("data-notifications")) {
-    if (!("Notification" in window)) return showToast("Notifications are not supported by this browser")
-    const permission = await Notification.requestPermission()
-    showToast(permission === "granted" ? "Notifications enabled" : `Notifications: ${permission}`)
+    state.notificationsOpen = true
+    render()
+    loadNotificationSettings()
+    return
+  }
+  if (target.hasAttribute("data-close-notifications")) {
+    state.notificationsOpen = false
+    render()
+    return
+  }
+  if (target.hasAttribute("data-enable-notifications")) {
+    await enableNotifications()
+    return
+  }
+  if (target.hasAttribute("data-disable-notifications")) {
+    await disableNotifications()
     return
   }
   if (target.hasAttribute("data-open-sessions")) {
@@ -1640,16 +1820,6 @@ window.visualViewport?.addEventListener("scroll", updateKeyboardInset)
 window.addEventListener("resize", updateKeyboardInset)
 updateKeyboardInset()
 
-function maybeNotify(event) {
-  if (!("Notification" in window) || Notification.permission !== "granted") return
-  if (document.visibilityState === "visible") return
-  const session = sessionFor(event.instanceId, event.sessionId)
-  const title = titleFor(session)
-  const tag = scopedKey(event.instanceId, event.requestId)
-  if (event.type === "question.asked") new Notification(`${title} needs an answer`, { body: event.request?.questions?.[0]?.question || "OpenCode asked a question", tag })
-  if (event.type === "permission.asked") new Notification(`${title} needs permission`, { body: event.request?.title || event.request?.type || "Permission requested", tag })
-}
-
 let devServerId = ""
 const source = new EventSource("/api/events")
 source.addEventListener("dev-server", (event) => {
@@ -1672,7 +1842,6 @@ source.addEventListener("agent-event", (message) => {
     state.selectedAgents.set(conversationKey(event.instanceId, event.sessionId), switchedAgent)
     if (routeMatches(event.instanceId, event.sessionId)) render()
   }
-  maybeNotify(event)
   if (event.type === "message.part" && event.part?.type === "patch" && routeMatches(event.instanceId, event.sessionId)) scheduleChangesRefresh()
   if (state.routeSessionId && routeMatches(event.instanceId, event.sessionId) && ["message.part", "message.updated", "session.status"].includes(event.type)) scheduleMessagesRefresh()
 })

@@ -11,6 +11,11 @@ export function loadConfig(env = process.env) {
     discovery: !["0", "false", "off"].includes((env.OPENCODE_DISCOVERY || "true").toLowerCase()),
     pluginToken: env.OPENCODE_POCKET_TOKEN || "",
     pluginTokenFile: env.OPENCODE_POCKET_TOKEN_FILE || join(stateHome, "opencode-pocket", "plugin-token"),
+    pushPublicKey: env.OPENCODE_POCKET_VAPID_PUBLIC_KEY || "",
+    pushPrivateKey: env.OPENCODE_POCKET_VAPID_PRIVATE_KEY || "",
+    pushSubject: env.OPENCODE_POCKET_VAPID_SUBJECT || "mailto:opencode-pocket@localhost",
+    pushVapidFile: env.OPENCODE_POCKET_VAPID_FILE || join(stateHome, "opencode-pocket", "push-vapid.json"),
+    pushSubscriptionsFile: env.OPENCODE_POCKET_PUSH_SUBSCRIPTIONS_FILE || join(stateHome, "opencode-pocket", "push-subscriptions.json"),
     host: env.HOST || "127.0.0.1",
     port: Number.parseInt(env.PORT || "8787", 10),
   }

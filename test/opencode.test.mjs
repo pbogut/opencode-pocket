@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { normalizeEvent, queryWithDirectory, requestId, sessionId } from "../src/opencode.mjs"
+import { normalizeEvent, OpenCodeBridge, queryWithDirectory, requestId, sessionId } from "../src/opencode.mjs"
 
 test("directory routing preserves existing query params", () => {
   assert.equal(queryWithDirectory("/session/abc/message?limit=20", "/tmp/project"), "/session/abc/message?limit=20&directory=%2Ftmp%2Fproject")
@@ -40,4 +40,31 @@ test("id helpers accept common spellings", () => {
   assert.equal(requestId({ id: "x" }), "x")
   assert.equal(requestId({ requestID: "y" }), "y")
   assert.equal(sessionId({ sessionId: "s" }), "s")
+})
+
+test("busy to idle emits one completion event", () => {
+  const bridge = new OpenCodeBridge({})
+  const events = []
+  bridge.on("event", (event) => events.push(event))
+
+  bridge.handleEvent({ type: "session.status", properties: { sessionID: "ses_1", status: { type: "busy" } } })
+  bridge.handleEvent({ type: "session.idle", properties: { sessionID: "ses_1" } })
+  bridge.handleEvent({ type: "session.idle", properties: { sessionID: "ses_1" } })
+
+  const completed = events.filter((event) => event.type === "session.completed")
+  assert.equal(completed.length, 1)
+  assert.equal(completed[0].sessionId, "ses_1")
+  assert.equal(completed[0].previousStatus.type, "busy")
+})
+
+test("session errors suppress completion", () => {
+  const bridge = new OpenCodeBridge({})
+  const events = []
+  bridge.on("event", (event) => events.push(event))
+
+  bridge.handleEvent({ type: "session.status", properties: { sessionID: "ses_1", status: { type: "busy" } } })
+  bridge.handleEvent({ type: "session.error", properties: { sessionID: "ses_1", error: { message: "failed" } } })
+  bridge.handleEvent({ type: "session.idle", properties: { sessionID: "ses_1" } })
+
+  assert.equal(events.some((event) => event.type === "session.completed"), false)
 })
