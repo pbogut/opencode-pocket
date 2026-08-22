@@ -577,10 +577,12 @@ function renderMessages() {
   if (state.loadingMessages && !state.messages.length) return `<div class="empty">Loading conversation…</div>`
   if (!state.messages.length) return `<div class="empty">No messages yet.</div>`
   return `<div class="messages">${state.messages.map((message) => {
-    const role = message?.info?.role || message?.role || "assistant"
+    const info = message?.info || message
+    const role = info?.role || "assistant"
+    const plan = role === "user" && (info?.agent || info?.mode) === "plan"
     const parts = renderMessageParts(message)
     if (!parts) return ""
-    return `<article class="message ${esc(role)}">
+    return `<article class="message ${esc(role)}${plan ? " plan" : ""}">
       <div class="message-role">${esc(role)}</div>
       <div class="message-parts">${parts}</div>
     </article>`
@@ -1073,13 +1075,14 @@ function updateAgentSelector() {
   const key = JSON.stringify(agents)
   if (state.renderedAgents !== key) {
     select.innerHTML = agents.length
-      ? agents.map((agent) => `<option value="${esc(agent.name)}" title="${esc(agent.description)}">${esc(agent.name)}</option>`).join("")
+      ? agents.map((agent) => `<option value="${esc(agent.name)}" title="${esc(agent.description)}">${esc(agent.name.charAt(0).toUpperCase() + agent.name.slice(1))}</option>`).join("")
       : `<option value="">Loading modes…</option>`
     state.renderedAgents = key
   }
   select.disabled = agents.length === 0 || state.switchingAgentSession === sessionKey
   const selected = state.selectedAgents.get(sessionKey)
   if (selected && agents.some((agent) => agent.name === selected)) select.value = selected
+  select.closest(".composer")?.classList.toggle("plan", select.value === "plan")
   const currentIndex = agents.findIndex((agent) => agent.name === selected)
   const next = agents.length ? agents[(currentIndex + 1) % agents.length] : null
   cycle.hidden = agents.length < 2
