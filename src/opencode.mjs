@@ -424,8 +424,12 @@ export class OpenCodeBridge extends EventEmitter {
     return session
   }
 
-  async sendMessage(sid, text, agent = "") {
-    const body = { parts: [{ type: "text", text }], ...(agent ? { agent } : {}) }
+  async sendMessage(sid, text, agent = "", images = []) {
+    const parts = [
+      ...(text ? [{ type: "text", text }] : []),
+      ...images.map(({ mime, filename, url }) => ({ type: "file", mime, filename, url })),
+    ]
+    const body = { parts, ...(agent ? { agent } : {}) }
     return this.request(this.pathForSession(`/session/${encodeURIComponent(sid)}/prompt_async`, sid), {
       method: "POST",
       body: JSON.stringify(body),

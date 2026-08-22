@@ -179,10 +179,13 @@ From a conversation:
 - tap the right-aligned `N blocked` button to open the next agent needing an answer; repeated taps cycle through blocked agents
 - open the session drawer to switch among the 10 newest root sessions or create a session
 - select an OpenCode mode in the composer; the selection is used for subsequent prompts
+- attach images from the picker or paste screenshots into the composer; remove unwanted previews before sending
 - open the changes view to inspect changed turns and load file diffs on demand
 - tap the microphone button for live dictation when the browser supports the Web Speech API
 
 Dictation appends interim and final speech to the current draft and never sends automatically. Sending a message or changing sessions stops recognition. Android uses non-continuous recognition, and microphone denial or recognition failures appear as a toast.
+
+Image prompts support JPEG, PNG, WebP, and GIF. A message can contain up to four images, with a 5 MiB limit per image and a 10 MiB combined limit. Images remain attached while switching sessions in the current browser tab, but unlike text drafts they are not stored across reloads. The selected OpenCode model must support image input.
 
 ## 4. Use Pocket on Android through Tailscale
 
@@ -305,7 +308,7 @@ Important request and response details:
 - `POST /api/refresh` refreshes known instances; it does not restart or force an mDNS scan
 - `POST .../sessions` accepts optional `{ "directory": "..." }`, selects the created session in OpenCode, and returns `201`
 - `GET .../messages?limit=N` defaults to 100 messages and caps the limit at 300
-- `POST .../messages` accepts `{ "text": "...", "agent": "optional-mode" }` and returns `202`
+- `POST .../messages` accepts optional text and images as `{ "text": "...", "agent": "optional-mode", "images": [{ "mime": "image/png", "filename": "screen.png", "url": "data:image/png;base64,..." }] }` and returns `202`; at least text or one image is required
 - `GET .../diff` requires the `messageId` query parameter
 - `POST .../agent` requires `{ "agent": "mode-name" }`
 - question replies require `{ "answers": [...] }`
@@ -328,7 +331,7 @@ Some OpenCode 1.17.x builds cannot reliably resolve permissions created by an in
 - authentication on Pocket's browser-facing UI
 - terminal fallback
 - todos
-- file uploads
+- non-image file uploads
 - markdown rendering
 
 ## Development

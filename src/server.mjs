@@ -8,6 +8,7 @@ import { loadConfig } from "./config.mjs"
 import { InstanceManager } from "./instances.mjs"
 import { loadPluginToken } from "./plugin-token.mjs"
 import { Notifications } from "./notifications.mjs"
+import { MAX_MESSAGE_BODY_BYTES, validateMessageInput } from "./message-input.mjs"
 
 const config = loadConfig()
 const pluginToken = await loadPluginToken(config)
@@ -34,16 +35,20 @@ function json(res, status, data) {
   res.end(body)
 }
 
-async function bodyJson(req) {
+async function bodyJson(req, maxBytes = 1_000_000) {
   const chunks = []
   let size = 0
   for await (const chunk of req) {
     size += chunk.length
-    if (size > 1_000_000) throw new Error("Request body too large")
+    if (size > maxBytes) throw Object.assign(new Error("Request body too large"), { statusCode: 413 })
     chunks.push(chunk)
   }
   if (chunks.length === 0) return {}
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"))
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"))
+  } catch {
+    throw Object.assign(new Error("Request body must be valid JSON"), { statusCode: 400 })
+  }
 }
 
 function broadcast(type, payload) {
@@ -191,11 +196,8 @@ const server = http.createServer(async (req, res) => {
     if (match && req.method === "POST") {
       const bridge = manager.bridge(decodeURIComponent(match[1]))
       const sid = decodeURIComponent(match[2])
-      const input = await bodyJson(req)
-      const text = String(input.text || "").trim()
-      if (!text) return json(res, 400, { error: "Message text is required" })
-      const agent = String(input.agent || "").trim()
-      await bridge.sendMessage(sid, text, agent)
+      const input = validateMessageInput(await bodyJson(req, MAX_MESSAGE_BODY_BYTES))
+      await bridge.sendMessage(sid, input.text, input.agent, input.images)
       return json(res, 202, { ok: true })
     }
 

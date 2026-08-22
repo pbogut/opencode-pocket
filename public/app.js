@@ -5,6 +5,10 @@ const app = document.querySelector("#app")
 const DRAFTS_KEY = "opencode-pocket-drafts-v1"
 const BOTTOM_THRESHOLD = 80
 const DEFAULT_NOTIFICATION_PREFERENCES = { blockers: true, completed: true }
+const IMAGE_MIME_TYPES = new Set(["image/gif", "image/jpeg", "image/png", "image/webp"])
+const MAX_IMAGE_COUNT = 4
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+const MAX_IMAGE_TOTAL_BYTES = 10 * 1024 * 1024
 const savedDrafts = loadDrafts()
 const initialRoute = routeFromHash()
 const notificationRoute = new URLSearchParams(location.search).get("notification") === "1"
@@ -35,6 +39,10 @@ const state = {
   diffErrors: new Map(),
   loadingDiffs: new Set(),
   messageDrafts: new Map(draftEntries(savedDrafts.messages).filter(([, value]) => typeof value === "string")),
+  messageAttachments: new Map(),
+  loadingAttachments: new Map(),
+  pendingAttachmentBytes: 0,
+  sendingMessages: new Set(),
   questionAnswers: new Map(draftEntries(savedDrafts.questions).filter(([, value]) => Array.isArray(value))),
   toast: "",
   refreshTimer: null,
@@ -518,6 +526,14 @@ function renderPatchPart(message, part, index) {
   </details>`
 }
 
+function renderFilePart(part) {
+  const mime = typeof part.mime === "string" ? part.mime : ""
+  const filename = typeof part.filename === "string" ? part.filename : "Attached image"
+  const url = typeof part.url === "string" ? part.url : ""
+  if (!IMAGE_MIME_TYPES.has(mime) || !url.startsWith(`data:${mime};base64,`)) return ""
+  return `<figure class="message-image"><img src="${esc(url)}" alt="${esc(filename)}" loading="lazy" decoding="async"><figcaption>${esc(filename)}</figcaption></figure>`
+}
+
 function diffTotals(files) {
   return (Array.isArray(files) ? files : []).reduce((totals, file) => ({
     additions: totals.additions + Number(file.additions || 0),
@@ -552,6 +568,7 @@ function renderMessageParts(message) {
     if (part?.type === "reasoning") return renderReasoning(message, part, index)
     if (part?.type === "tool") return renderTool(message, part, index)
     if (part?.type === "patch") return renderPatchPart(message, part, index)
+    if (part?.type === "file") return renderFilePart(part)
     return ""
   }).filter(Boolean).join("")
 }
@@ -1014,6 +1031,7 @@ function renderConversationShell() {
       </section>
       <form class="composer" data-composer>
         <div class="composer-input">
+          <div class="attachment-previews" data-attachment-previews hidden></div>
           <div class="mode-picker">
             <label><span>Mode</span><select data-agent-select aria-label="OpenCode mode"><option value="">Loading modes…</option></select></label>
             <button type="button" class="mode-cycle" data-cycle-agent hidden aria-label="Switch to next mode" title="Switch to next mode">↻</button>
@@ -1021,6 +1039,10 @@ function renderConversationShell() {
           <textarea name="message" rows="1" placeholder="Message OpenCode…" autocomplete="off" aria-keyshortcuts="Enter" title="Enter to send, Shift+Enter for a new line">${esc(draft)}</textarea>
         </div>
         <div class="composer-actions">
+          <input type="file" data-image-input accept="image/gif,image/jpeg,image/png,image/webp" multiple hidden>
+          <button type="button" class="attach-button" data-attach-image aria-label="Attach images" title="Attach images">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20.5 11.5-8.8 8.8a6 6 0 0 1-8.5-8.5l9.6-9.6a4 4 0 0 1 5.7 5.7l-9.6 9.6a2 2 0 0 1-2.8-2.8l8.8-8.8"></path></svg>
+          </button>
           <button type="button" class="dictate-button" data-dictate hidden aria-label="Start dictation" aria-pressed="false" title="Start dictation">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"></path></svg>
           </button>
@@ -1284,6 +1306,7 @@ function updateConversation(session) {
   } else {
     updateStopConfirmation()
   }
+  updateAttachmentView()
   updateDictationButton()
   resizeComposerTextarea()
   updateAgentSelector()
@@ -1369,11 +1392,159 @@ function captureComposerSelection() {
   return true
 }
 
+let composerInsetFrame = 0
+function updateComposerInset() {
+  cancelAnimationFrame(composerInsetFrame)
+  composerInsetFrame = requestAnimationFrame(() => {
+    const conversation = app.querySelector(".conversation")
+    const composer = app.querySelector(".composer-wrap")
+    if (conversation && composer) conversation.style.paddingBottom = `${Math.ceil(composer.getBoundingClientRect().height + 18)}px`
+  })
+}
+
 function resizeComposerTextarea(textarea = app.querySelector("[data-composer] textarea")) {
   if (!textarea) return
   textarea.style.height = "auto"
   textarea.style.height = `${Math.min(textarea.scrollHeight, 150)}px`
   textarea.scrollTop = textarea.scrollHeight
+  updateComposerInset()
+}
+
+function renderAttachmentPreviews() {
+  const attachments = state.messageAttachments.get(conversationKey()) || []
+  return attachments.map((attachment) => `<figure class="attachment-preview">
+    <img src="${esc(attachment.url)}" alt="">
+    <figcaption>${esc(attachment.filename)}</figcaption>
+    <button type="button" data-remove-attachment="${esc(attachment.id)}" aria-label="Remove ${esc(attachment.filename)}" title="Remove image">×</button>
+  </figure>`).join("")
+}
+
+function updateAttachmentView() {
+  const previews = app.querySelector("[data-attachment-previews]")
+  const attach = app.querySelector("[data-attach-image]")
+  const send = app.querySelector("[data-composer] .send-button")
+  if (!previews || !attach || !send) return
+  const key = conversationKey()
+  const attachments = state.messageAttachments.get(key) || []
+  const loading = (state.loadingAttachments.get(key) || 0) > 0
+  const sending = state.sendingMessages.has(key)
+  previews.hidden = attachments.length === 0
+  previews.innerHTML = renderAttachmentPreviews()
+  attach.disabled = loading || sending || attachments.length >= MAX_IMAGE_COUNT
+  attach.setAttribute("aria-label", loading ? "Images are loading" : attachments.length >= MAX_IMAGE_COUNT ? "Maximum images attached" : "Attach images")
+  send.disabled = loading || sending
+  send.setAttribute("aria-label", loading ? "Images are loading" : sending ? "Sending message" : "Send message")
+  updateComposerInset()
+}
+
+function readImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Could not read image"))
+    reader.onerror = () => reject(new Error(`Could not read ${file.name || "image"}`))
+    reader.readAsDataURL(file)
+  })
+}
+
+function safeImageFilename(file) {
+  const extension = { "image/gif": "gif", "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" }[file.type] || "img"
+  return (file.name.trim() || `image.${extension}`).replace(/[\u0000-\u001f\u007f]/g, "_").slice(0, 255)
+}
+
+function draftImageBytes() {
+  let total = 0
+  for (const attachments of state.messageAttachments.values()) {
+    for (const attachment of attachments) total += attachment.size
+  }
+  return total
+}
+
+function setAttachmentLoading(key, loading) {
+  const count = state.loadingAttachments.get(key) || 0
+  if (loading) state.loadingAttachments.set(key, count + 1)
+  else if (count > 1) state.loadingAttachments.set(key, count - 1)
+  else state.loadingAttachments.delete(key)
+  if (conversationKey() === key) updateAttachmentView()
+}
+
+async function addImageFiles(fileList) {
+  const key = conversationKey()
+  if (!key) return
+  const current = state.messageAttachments.get(key) || []
+  let count = current.length
+  let total = current.reduce((sum, attachment) => sum + attachment.size, 0)
+  let draftTotal = draftImageBytes() + state.pendingAttachmentBytes
+  let acceptedBytes = 0
+  const accepted = []
+  const errors = []
+
+  for (const file of fileList) {
+    if (!IMAGE_MIME_TYPES.has(file.type)) {
+      errors.push(`${file.name || "Image"} is not a supported image type`)
+      continue
+    }
+    if (count >= MAX_IMAGE_COUNT) {
+      errors.push(`A message can include at most ${MAX_IMAGE_COUNT} images`)
+      break
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      errors.push(`${file.name || "Image"} exceeds the 5 MiB limit`)
+      continue
+    }
+    if (total + file.size > MAX_IMAGE_TOTAL_BYTES) {
+      errors.push("Images exceed the 10 MiB total limit")
+      continue
+    }
+    if (draftTotal + file.size > MAX_IMAGE_TOTAL_BYTES) {
+      errors.push("Image drafts across sessions exceed the 10 MiB limit")
+      continue
+    }
+    accepted.push(file)
+    count += 1
+    total += file.size
+    draftTotal += file.size
+    acceptedBytes += file.size
+  }
+
+  if (!accepted.length) {
+    if (errors.length) showToast(errors[0])
+    return
+  }
+  state.pendingAttachmentBytes += acceptedBytes
+  setAttachmentLoading(key, true)
+  try {
+    const attachments = await Promise.all(accepted.map(async (file) => {
+      const url = await readImage(file)
+      if (!url.startsWith(`data:${file.type};base64,`)) throw new Error(`Could not encode ${file.name || "image"}`)
+      return {
+        id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`,
+        mime: file.type,
+        filename: safeImageFilename(file),
+        size: file.size,
+        url,
+      }
+    }))
+    const latest = state.messageAttachments.get(key) || []
+    let latestSize = latest.reduce((sum, attachment) => sum + attachment.size, 0)
+    let latestCount = latest.length
+    let latestDraftSize = draftImageBytes()
+    const available = attachments.filter((attachment) => {
+      if (latestCount >= MAX_IMAGE_COUNT || latestSize + attachment.size > MAX_IMAGE_TOTAL_BYTES || latestDraftSize + attachment.size > MAX_IMAGE_TOTAL_BYTES) return false
+      latestCount += 1
+      latestSize += attachment.size
+      latestDraftSize += attachment.size
+      return true
+    })
+    if (available.length < attachments.length) errors.push("Some images could not be added because the attachment limit was reached")
+    if (available.length) state.messageAttachments.set(key, [...latest, ...available])
+  } catch (error) {
+    errors.push(error.message || "Could not read image")
+  } finally {
+    state.pendingAttachmentBytes = Math.max(0, state.pendingAttachmentBytes - acceptedBytes)
+    setAttachmentLoading(key, false)
+  }
+
+  if (errors.length) showToast(errors[0])
 }
 
 function updateKeyboardInset() {
@@ -1688,6 +1859,16 @@ app.addEventListener("input", (event) => {
   }
 })
 
+app.addEventListener("paste", (event) => {
+  if (!event.target.closest("[data-composer] textarea")) return
+  const files = [...(event.clipboardData?.items || [])]
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter(Boolean)
+  if (!files.length) return
+  addImageFiles(files)
+})
+
 app.addEventListener("toggle", (event) => {
   const details = event.target.closest("details[data-part-key]")
   if (!details) return
@@ -1747,6 +1928,12 @@ app.addEventListener("keydown", (event) => {
 })
 
 app.addEventListener("change", (event) => {
+  const imageInput = event.target.closest("[data-image-input]")
+  if (imageInput) {
+    addImageFiles([...imageInput.files])
+    imageInput.value = ""
+    return
+  }
   const browserPreference = event.target.closest("[data-browser-notification-preference]")
   if (browserPreference) {
     state.notificationPreferences[browserPreference.dataset.browserNotificationPreference] = browserPreference.checked
@@ -1813,6 +2000,18 @@ app.addEventListener("click", async (event) => {
   if (target.hasAttribute("data-dictate")) {
     if (speechDictation) stopDictation()
     else startDictation()
+    return
+  }
+  if (target.hasAttribute("data-attach-image")) {
+    app.querySelector("[data-image-input]")?.click()
+    return
+  }
+  if (target.dataset.removeAttachment) {
+    const key = conversationKey()
+    const attachments = (state.messageAttachments.get(key) || []).filter((attachment) => attachment.id !== target.dataset.removeAttachment)
+    if (attachments.length) state.messageAttachments.set(key, attachments)
+    else state.messageAttachments.delete(key)
+    updateAttachmentView()
     return
   }
   if (target.hasAttribute("data-back")) {
@@ -1975,20 +2174,36 @@ app.addEventListener("submit", async (event) => {
   stopDictation(true)
   const textarea = form.elements.message
   const text = textarea.value.trim()
-  if (!text) return
   const sid = state.routeSessionId
   const iid = state.routeInstanceId
   const key = conversationKey(iid, sid)
+  if ((state.loadingAttachments.get(key) || 0) > 0) return showToast("Wait for images to finish loading")
+  if (state.sendingMessages.has(key)) return
+  const attachments = [...(state.messageAttachments.get(key) || [])]
+  if (!text && attachments.length === 0) return
   const agent = state.selectedAgents.get(key) || ""
+  state.sendingMessages.add(key)
+  updateAttachmentView()
   try {
-    await api(sessionApiPath(iid, sid, "messages"), { method: "POST", body: JSON.stringify({ text, agent }) })
+    const images = attachments.map(({ mime, filename, url }) => ({ mime, filename, url }))
+    await api(sessionApiPath(iid, sid, "messages"), { method: "POST", body: JSON.stringify({ text, agent, images }) })
     state.messageDrafts.delete(key)
+    const sentIds = new Set(attachments.map((attachment) => attachment.id))
+    const remaining = (state.messageAttachments.get(key) || []).filter((attachment) => !sentIds.has(attachment.id))
+    if (remaining.length) state.messageAttachments.set(key, remaining)
+    else state.messageAttachments.delete(key)
     persistDrafts()
     textarea.value = ""
     resizeComposerTextarea(textarea)
-    if (routeMatches(iid, sid)) scheduleMessagesRefresh()
+    if (routeMatches(iid, sid)) {
+      updateAttachmentView()
+      scheduleMessagesRefresh()
+    }
   } catch (error) {
     showToast(error.message)
+  } finally {
+    state.sendingMessages.delete(key)
+    if (routeMatches(iid, sid)) updateAttachmentView()
   }
 })
 

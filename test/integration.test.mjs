@@ -179,9 +179,21 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
   assert.equal(permissionCall.body.response, "once")
   assert.equal(new URLSearchParams(permissionCall.search).get("directory"), projectDir)
 
-  await bridge.sendMessage("ses_1", "Continue", "review")
-  const promptCall = calls.find((call) => call.path === "/session/ses_1/prompt_async")
-  assert.deepEqual(promptCall.body, { parts: [{ type: "text", text: "Continue" }], agent: "review" })
+  const image = { type: "file", mime: "image/png", filename: "screen.png", url: "data:image/png;base64,aW1hZ2U=" }
+  await bridge.sendMessage("ses_1", "Continue", "review", [image])
+  await bridge.sendMessage("ses_1", "", "", [image])
+  const promptCalls = calls.filter((call) => call.path === "/session/ses_1/prompt_async")
+  assert.deepEqual(promptCalls[0].body, {
+    parts: [
+      { type: "text", text: "Continue" },
+      { type: "file", mime: "image/png", filename: "screen.png", url: "data:image/png;base64,aW1hZ2U=" },
+    ],
+    agent: "review",
+  })
+  assert.deepEqual(promptCalls[1].body, {
+    parts: [{ type: "file", mime: "image/png", filename: "screen.png", url: "data:image/png;base64,aW1hZ2U=" }],
+  })
+  const promptCall = promptCalls[0]
   assert.equal(new URLSearchParams(promptCall.search).get("directory"), projectDir)
 })
 
