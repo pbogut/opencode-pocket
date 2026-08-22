@@ -1547,16 +1547,9 @@ async function addImageFiles(fileList) {
   if (errors.length) showToast(errors[0])
 }
 
-function updateKeyboardInset() {
-  const viewport = window.visualViewport
-  const inset = viewport ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop) : 0
-  document.documentElement.style.setProperty("--keyboard-inset", `${Math.round(inset)}px`)
-}
-
 function revealComposer(textarea) {
   if (!textarea?.isConnected) return
   resizeComposerTextarea(textarea)
-  updateKeyboardInset()
   window.scrollTo(0, document.documentElement.scrollHeight)
   textarea.scrollIntoView({ block: "nearest" })
 }
@@ -2258,11 +2251,6 @@ window.addEventListener("scroll", () => {
   state.followMessages = isNearBottom()
   updateScrollToLatestButton()
 }, { passive: true })
-
-window.visualViewport?.addEventListener("resize", updateKeyboardInset)
-window.visualViewport?.addEventListener("scroll", updateKeyboardInset)
-window.addEventListener("resize", updateKeyboardInset)
-updateKeyboardInset()
 
 let devServerId = ""
 const source = new EventSource("/api/events")

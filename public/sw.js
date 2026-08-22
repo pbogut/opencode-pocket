@@ -1,4 +1,4 @@
-const CACHE = "opencode-pocket-v4"
+const CACHE = "opencode-pocket-v6"
 const ACK_CACHE = "opencode-pocket-notification-acks-v1"
 const ASSETS = ["/", "/styles.css", "/app.js", "/notification-state.js", "/manifest.webmanifest", "/icon.svg"]
 const acknowledgedCompletions = new Set()
