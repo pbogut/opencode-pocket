@@ -133,7 +133,9 @@ function titleFor(session) {
 }
 
 function statusFor(session) {
-  if (session.attention) return { label: "blocked", className: "attention" }
+  if (session.attention || pendingQuestion(session.instanceId, session.id) || pendingPermission(session.instanceId, session.id)) {
+    return { label: "blocked", className: "attention" }
+  }
   const type = session.status?.type || "idle"
   return { label: type === "busy" ? "working" : type, className: type }
 }
@@ -144,6 +146,22 @@ function instanceFor(id) {
 
 function sessionFor(instanceId, sessionId) {
   return state.snapshot.sessions.find((item) => item.instanceId === instanceId && item.id === sessionId)
+}
+
+function requestSessionId(request) {
+  return request?.sessionID || request?.sessionId || ""
+}
+
+function sessionContains(instanceId, ancestorId, sessionId) {
+  const seen = new Set()
+  let currentId = sessionId
+  while (currentId && !seen.has(currentId)) {
+    if (currentId === ancestorId) return true
+    seen.add(currentId)
+    const session = sessionFor(instanceId, currentId)
+    currentId = session?.parentID || session?.parentId || ""
+  }
+  return false
 }
 
 function rootSessionsFor(instanceId) {
@@ -197,11 +215,11 @@ function applySnapshot(snapshot) {
 }
 
 function pendingQuestion(instanceId, sessionId) {
-  return state.snapshot.questions.find((item) => item.instanceId === instanceId && (item.sessionID || item.sessionId) === sessionId)
+  return state.snapshot.questions.find((item) => item.instanceId === instanceId && sessionContains(instanceId, sessionId, requestSessionId(item)))
 }
 
 function pendingPermission(instanceId, sessionId) {
-  return state.snapshot.permissions.find((item) => item.instanceId === instanceId && (item.sessionID || item.sessionId) === sessionId)
+  return state.snapshot.permissions.find((item) => item.instanceId === instanceId && sessionContains(instanceId, sessionId, requestSessionId(item)))
 }
 
 async function api(path, options = {}) {
@@ -938,7 +956,7 @@ function updateConversation(session) {
   badge.className = `badge ${status.className}`
   const stop = app.querySelector("[data-stop]")
   const activity = session.status?.type
-  const active = !session.attention && (activity === "busy" || activity === "retry")
+  const active = status.className !== "attention" && (activity === "busy" || activity === "retry")
   stop.hidden = !active
   stop.classList.toggle("retry", activity === "retry")
   stop.setAttribute("aria-label", activity === "retry" ? "Agent is retrying. Stop current request" : "Agent is working. Stop current request")
@@ -1537,8 +1555,10 @@ app.addEventListener("click", async (event) => {
   if (target.dataset.permissionResponse) {
     const permission = pendingPermission(state.routeInstanceId, state.routeSessionId)
     if (!permission) return
+    const permissionSessionId = requestSessionId(permission)
+    if (!permissionSessionId) return showToast("Permission session not found")
     try {
-      await api(`/api/instances/${encodeURIComponent(state.routeInstanceId)}/permissions/${encodeURIComponent(state.routeSessionId)}/${encodeURIComponent(permissionId(permission))}/reply`, {
+      await api(`/api/instances/${encodeURIComponent(state.routeInstanceId)}/permissions/${encodeURIComponent(permissionSessionId)}/${encodeURIComponent(permissionId(permission))}/reply`, {
         method: "POST",
         body: JSON.stringify({ response: target.dataset.permissionResponse }),
       })
