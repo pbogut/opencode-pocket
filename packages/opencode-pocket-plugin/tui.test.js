@@ -17,20 +17,32 @@ async function waitFor(predicate, timeout = 1_000) {
 test("resolves Pocket URL and the XDG token path", () => {
   assert.deepEqual(resolveOptions({}, { XDG_STATE_HOME: "/state" }, "/home/test"), {
     pocketUrl: "http://127.0.0.1:8787",
+    pocketUrls: ["http://127.0.0.1:8787"],
     tokenFile: "/state/opencode-pocket/plugin-token",
   })
   assert.deepEqual(
     resolveOptions(
       { pocketUrl: "https://pocket.example/base", tokenFile: "~/.pocket-token" },
-      { OPENCODE_POCKET_URL: "https://ignored.example" },
+      { OPENCODE_POCKET_URLS: "https://ignored-one.example,https://ignored-two.example", OPENCODE_POCKET_URL: "https://ignored.example" },
       "/home/test",
     ),
-    { pocketUrl: "https://pocket.example", tokenFile: "/home/test/.pocket-token" },
+    { pocketUrl: "https://pocket.example", pocketUrls: ["https://pocket.example"], tokenFile: "/home/test/.pocket-token" },
   )
   assert.deepEqual(resolveOptions({}, { OPENCODE_POCKET_TOKEN_FILE: "~/.env-token" }, "/home/test"), {
     pocketUrl: "http://127.0.0.1:8787",
+    pocketUrls: ["http://127.0.0.1:8787"],
     tokenFile: "/home/test/.env-token",
   })
+  assert.deepEqual(resolveOptions({ pocketUrls: ["http://127.0.0.1:8787", "http://127.0.0.1:8788", "http://127.0.0.1:8787/path"] }, {}, "/home/test"), {
+    pocketUrl: "http://127.0.0.1:8787",
+    pocketUrls: ["http://127.0.0.1:8787", "http://127.0.0.1:8788"],
+    tokenFile: "/home/test/.local/state/opencode-pocket/plugin-token",
+  })
+  assert.deepEqual(resolveOptions({}, { OPENCODE_POCKET_URLS: "http://127.0.0.1:8787, http://127.0.0.1:8788" }, "/home/test")?.pocketUrls, [
+    "http://127.0.0.1:8787",
+    "http://127.0.0.1:8788",
+  ])
+  assert.deepEqual(resolveOptions({ pocketUrl: "http://127.0.0.1:8787/path,a" }, {}, "/home/test")?.pocketUrls, ["http://127.0.0.1:8787"])
 })
 
 test("extracts route state and includes session IDs only for sessions", () => {
@@ -122,5 +134,80 @@ test("reports TUI route changes and disconnects on disposal", async () => {
   } finally {
     globalThis.fetch = originalFetch
     if (dispose && requests.at(-1)?.method !== "DELETE") await dispose()
+  }
+})
+
+test("reports to each Pocket target independently", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-pocket-plugin-multi-"))
+  const tokenFile = join(directory, "token")
+  await writeFile(tokenFile, "test-token\n")
+  const requests = []
+  const originalFetch = globalThis.fetch
+  let dispose
+  let disposed = false
+  const api = {
+    route: { current: { name: "home" } },
+    client: {
+      global: {
+        health: async () => ({ response: { url: "http://127.0.0.1:4321/global/health" } }),
+      },
+    },
+    lifecycle: { onDispose: (callback) => { dispose = callback } },
+  }
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, method: options.method, body: JSON.parse(options.body) })
+    return url.startsWith("http://127.0.0.1:8787") ? { ok: false, status: 503 } : { ok: true }
+  }
+
+  try {
+    await plugin.tui(api, { pocketUrls: ["http://127.0.0.1:8787", "http://127.0.0.1:8788"], tokenFile })
+    await waitFor(() => requests.some((request) => request.url.startsWith("http://127.0.0.1:8788") && request.method === "POST"))
+    api.route.current = { name: "session", params: { sessionID: "ses_multi" } }
+    await waitFor(() => requests.some((request) => request.url.startsWith("http://127.0.0.1:8788") && request.body.sessionId === "ses_multi"))
+    await waitFor(() => requests.filter((request) => request.url.startsWith("http://127.0.0.1:8787") && request.method === "POST").length >= 3, 1_500)
+    await dispose()
+    disposed = true
+
+    const healthy = requests.filter((request) => request.url.startsWith("http://127.0.0.1:8788"))
+    assert.deepEqual(healthy.map((request) => request.method), ["POST", "POST", "DELETE"])
+    assert.ok(requests.some((request) => request.url.startsWith("http://127.0.0.1:8787")))
+    assert.equal(healthy[0].body.serverUrl, "http://127.0.0.1:4321")
+    assert.equal(healthy[1].body.sessionId, "ses_multi")
+  } finally {
+    globalThis.fetch = originalFetch
+    if (dispose && !disposed) await dispose()
+  }
+})
+
+test("waits for in-flight reports before disconnecting", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-pocket-plugin-dispose-"))
+  const tokenFile = join(directory, "token")
+  await writeFile(tokenFile, "test-token\n")
+  const events = []
+  const originalFetch = globalThis.fetch
+  let dispose
+  const api = {
+    route: { current: { name: "home" } },
+    client: {
+      global: {
+        health: async () => ({ response: { url: "http://127.0.0.1:4321/global/health" } }),
+      },
+    },
+    lifecycle: { onDispose: (callback) => { dispose = callback } },
+  }
+  globalThis.fetch = async (_url, options) => {
+    events.push(`${options.method}-start`)
+    if (options.method === "POST") await new Promise((resolve) => setTimeout(resolve, 50))
+    events.push(`${options.method}-end`)
+    return { ok: true }
+  }
+
+  try {
+    await plugin.tui(api, { tokenFile })
+    await waitFor(() => events.includes("POST-start"))
+    await dispose()
+    assert.deepEqual(events, ["POST-start", "POST-end", "DELETE-start", "DELETE-end"])
+  } finally {
+    globalThis.fetch = originalFetch
   }
 })

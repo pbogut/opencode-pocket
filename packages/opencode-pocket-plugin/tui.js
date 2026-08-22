@@ -18,7 +18,14 @@ function expandHome(value, home) {
 }
 
 export function resolveOptions(options = {}, env = process.env, home = homedir()) {
-  const pocketUrl = options.pocketUrl || options.url || env.OPENCODE_POCKET_URL || DEFAULT_POCKET_URL
+  const optionUrls = options.pocketUrls
+  const optionUrl = options.pocketUrl || options.url
+  const envUrls = env.OPENCODE_POCKET_URLS
+  const values = optionUrls
+    ? Array.isArray(optionUrls) ? optionUrls : String(optionUrls).split(",")
+    : optionUrl ? [optionUrl]
+      : envUrls ? String(envUrls).split(",")
+        : [env.OPENCODE_POCKET_URL || DEFAULT_POCKET_URL]
   const stateHome = env.XDG_STATE_HOME || join(home, ".local", "state")
   const tokenFile = expandHome(
     options.tokenFile || env.OPENCODE_POCKET_TOKEN_FILE || join(stateHome, "opencode-pocket", "plugin-token"),
@@ -26,7 +33,9 @@ export function resolveOptions(options = {}, env = process.env, home = homedir()
   )
 
   try {
-    return { pocketUrl: new URL(pocketUrl).origin, tokenFile }
+    const pocketUrls = [...new Set(values.map((value) => new URL(String(value).trim()).origin))]
+    if (pocketUrls.length === 0) return null
+    return { pocketUrl: pocketUrls[0], pocketUrls, tokenFile }
   } catch {
     return null
   }
@@ -62,12 +71,9 @@ async function tui(api, options) {
   let disposed = false
   let serverUrl
   let token
-  let sending = false
-  let retryTimer
   let discoveryTimer
-  let activeController
   let warnedMissingPort = false
-  const queue = []
+  const targets = config.pocketUrls.map((pocketUrl) => ({ pocketUrl, queue: [], sending: false }))
   let current = routeState(api.route.current)
   let currentKey = JSON.stringify(current)
 
@@ -84,12 +90,12 @@ async function tui(api, options) {
     pluginVersion: PLUGIN_VERSION,
   })
 
-  const request = async (method, body, timeoutMs) => {
+  const request = async (target, method, body, timeoutMs) => {
     const controller = new AbortController()
-    activeController = controller
+    target.activeController = controller
     const timeout = setTimeout(() => controller.abort(), timeoutMs)
     try {
-      const response = await fetch(`${config.pocketUrl}/api/plugin/tui-state`, {
+      const response = await fetch(`${target.pocketUrl}/api/plugin/tui-state`, {
         method,
         headers: {
           Authorization: `Bearer ${token}`,
@@ -101,37 +107,43 @@ async function tui(api, options) {
       if (!response.ok) throw new Error(`Pocket returned ${response.status}`)
     } finally {
       clearTimeout(timeout)
-      if (activeController === controller) activeController = undefined
+      if (target.activeController === controller) target.activeController = undefined
     }
   }
 
-  const flush = async () => {
-    if (disposed || sending || !serverUrl || queue.length === 0) return
-    sending = true
-    try {
-      token ||= await loadToken()
-      if (!token) throw new Error("Pocket plugin token is empty")
-      while (!disposed && queue.length > 0) {
-        const item = queue[0]
-        await request("POST", { serverUrl, ...item }, 2_000)
-        if (queue[0] === item) queue.shift()
+  const flush = (target) => {
+    if (disposed || target.sending || !serverUrl || target.queue.length === 0) return target.flushPromise
+    target.sending = true
+    target.flushPromise = (async () => {
+      try {
+        token ||= await loadToken()
+        if (!token) throw new Error("Pocket plugin token is empty")
+        while (!disposed && target.queue.length > 0) {
+          const item = target.queue[0]
+          await request(target, "POST", { serverUrl, ...item }, 2_000)
+          if (target.queue[0] === item) target.queue.shift()
+        }
+      } catch {
+        token = undefined
+        if (!disposed && !target.retryTimer) {
+          target.retryTimer = setTimeout(() => {
+            target.retryTimer = undefined
+            void flush(target)
+          }, RETRY_MS)
+        }
+      } finally {
+        target.sending = false
       }
-    } catch {
-      token = undefined
-      if (!disposed && !retryTimer) {
-        retryTimer = setTimeout(() => {
-          retryTimer = undefined
-          void flush()
-        }, RETRY_MS)
-      }
-    } finally {
-      sending = false
-    }
+    })()
+    return target.flushPromise
   }
 
   const enqueue = (state) => {
-    queue.splice(0, queue.length, report(state))
-    void flush()
+    const item = report(state)
+    for (const target of targets) {
+      target.queue.splice(0, target.queue.length, item)
+      void flush(target)
+    }
   }
 
   const discover = async () => {
@@ -151,7 +163,7 @@ async function tui(api, options) {
       serverUrl = undefined
     }
     if (serverUrl) {
-      void flush()
+      for (const target of targets) void flush(target)
       return
     }
     if (!disposed) discoveryTimer = setTimeout(() => void discover(), RETRY_MS)
@@ -179,15 +191,18 @@ async function tui(api, options) {
     disposed = true
     clearInterval(poll)
     clearInterval(heartbeat)
-    clearTimeout(retryTimer)
     clearTimeout(discoveryTimer)
-    activeController?.abort()
+    for (const target of targets) {
+      clearTimeout(target.retryTimer)
+    }
+    await Promise.allSettled(targets.map((target) => target.flushPromise).filter(Boolean))
 
     if (!serverUrl) return
     try {
       token ||= await loadToken()
       if (!token) return
-      await request("DELETE", { serverUrl, ...report(current) }, 1_000)
+      const item = report(current)
+      await Promise.allSettled(targets.map((target) => request(target, "DELETE", { serverUrl, ...item }, 1_000)))
     } catch {
       // Shutdown reporting is best effort.
     }

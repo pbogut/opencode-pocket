@@ -130,6 +130,27 @@ Add the TUI plugin to `~/.config/opencode/tui.json`. While working from this che
 }
 ```
 
+To report the same TUI to production and development Pocket processes, use `pocketUrls` instead:
+
+```json
+{
+  "$schema": "https://opencode.ai/tui.json",
+  "plugin": [
+    [
+      "file:///absolute/path/to/opencode-pocket/packages/opencode-pocket-plugin/tui.js",
+      {
+        "pocketUrls": [
+          "http://127.0.0.1:8787",
+          "http://127.0.0.1:8788"
+        ]
+      }
+    ]
+  ]
+}
+```
+
+Each target has an independent queue, timeout, and retry schedule, so an unavailable development server does not interrupt production reports. The existing singular `pocketUrl` and `url` options remain supported.
+
 If the package is installed from npm, replace the file URL with `"opencode-pocket-plugin/tui"`.
 
 The plugin and Pocket use the same default token path. To override it, set `OPENCODE_POCKET_TOKEN_FILE` for both processes or add `"tokenFile"` to the plugin options. You may instead provide the token directly through `OPENCODE_POCKET_TOKEN` to both processes.
@@ -232,7 +253,7 @@ The service and direct launcher both load `~/.config/opencode-pocket/env`. The p
 | `HOST` | `127.0.0.1` | Pocket listen address |
 | `PORT` | `8787` | Pocket listen port |
 
-The TUI plugin also accepts `OPENCODE_POCKET_URL`, which defaults to `http://127.0.0.1:8787`. Plugin options can override it with `pocketUrl` or its `url` alias, and can override the token path with `tokenFile`.
+The TUI plugin accepts `OPENCODE_POCKET_URL`, which defaults to `http://127.0.0.1:8787`, or a comma-separated `OPENCODE_POCKET_URLS` list. Plugin options override these with `pocketUrls`, singular `pocketUrl`, or the `url` alias. The `tokenFile` option overrides the shared token path.
 
 Basic auth and `OPENCODE_DIRECTORY` are global Pocket settings; per-instance credentials and directory defaults are not currently supported. Session metadata still takes precedence when Pocket knows the session's directory.
 
