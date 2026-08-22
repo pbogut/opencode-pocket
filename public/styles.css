@@ -224,6 +224,9 @@ body.sessions-open { overflow: hidden; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .permission-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #0f1217; border-radius: 10px; padding: 10px; white-space: pre-wrap; word-break: break-word; font-size: 12px; color: #d9dce2; }
 .composer-wrap { position: fixed; left: 0; right: 0; bottom: var(--keyboard-inset, 0px); z-index: 20; padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 18%); }
+.scroll-latest { min-height: 34px; display: flex; align-items: center; gap: 7px; margin: 0 auto 8px; border: 1px solid #3d477f; border-radius: 999px; background: #181d2b; box-shadow: 0 7px 22px rgb(0 0 0 / .38); padding: 7px 12px; color: #cdd3ff; font-size: 12px; font-weight: 700; cursor: pointer; }
+.scroll-latest[hidden] { display: none; }
+.scroll-latest span { color: var(--accent); font-size: 15px; line-height: 1; }
 .attention-sheet { max-width: 732px; margin: 0 auto 8px; overflow: hidden; border: 1px solid #6c5828; border-radius: 18px; background: #211c12; box-shadow: 0 -14px 36px rgb(0 0 0 / .35); }
 .attention-sheet[hidden] { display: none; }
 .attention-sheet-toggle { width: 100%; min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 0; background: #2a2415; padding: 10px 14px; text-align: left; cursor: pointer; }

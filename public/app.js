@@ -48,6 +48,8 @@ const state = {
   attentionRequest: "",
   attentionCollapsed: false,
   followMessages: true,
+  scrollingToLatest: false,
+  scrollToLatestTimer: null,
   followInstanceId: "",
   directFollowInstanceId: initialRoute.sessionId && !notificationRoute ? initialRoute.instanceId : "",
   pendingTuiSelection: null,
@@ -580,6 +582,32 @@ function scrollToLatest() {
   })
 }
 
+function updateScrollToLatestButton() {
+  const button = app.querySelector("[data-scroll-latest]")
+  if (!button) return
+  button.hidden = state.followMessages || state.scrollingToLatest || isNearBottom()
+}
+
+function finishJumpToLatest() {
+  state.scrollingToLatest = false
+  state.followMessages = isNearBottom()
+  updateScrollToLatestButton()
+}
+
+function scheduleJumpToLatestFinish(delay = 120) {
+  clearTimeout(state.scrollToLatestTimer)
+  state.scrollToLatestTimer = setTimeout(finishJumpToLatest, delay)
+}
+
+function jumpToLatest() {
+  state.followMessages = true
+  state.scrollingToLatest = true
+  updateScrollToLatestButton()
+  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+  window.scrollTo({ top: document.documentElement.scrollHeight, behavior: reducedMotion ? "auto" : "smooth" })
+  scheduleJumpToLatestFinish(reducedMotion ? 0 : 1_000)
+}
+
 function questionId(q) { return q?.id || q?.requestID || q?.requestId || "" }
 function permissionId(p) { return p?.id || p?.requestID || p?.requestId || p?.permissionID || "" }
 
@@ -960,6 +988,7 @@ function renderConversationShell() {
       </section>
     </div>
     <div class="composer-wrap">
+      <button type="button" class="scroll-latest" data-scroll-latest hidden>Scroll to bottom <span aria-hidden="true">↓</span></button>
       <section class="attention-sheet" data-attention-sheet hidden>
         <button type="button" class="attention-sheet-toggle" data-toggle-attention aria-expanded="true">
           <span><strong>Needs input</strong><small data-attention-summary></small></span>
@@ -1215,6 +1244,7 @@ function updateConversation(session) {
     state.renderedMessages = messages
     if (state.followMessages) scrollToLatest()
   }
+  updateScrollToLatestButton()
 
   app.querySelector("[data-toast]").innerHTML = state.toast ? `<div class="toast">${esc(state.toast)}</div>` : ""
 }
@@ -1613,6 +1643,7 @@ app.addEventListener("toggle", (event) => {
     state.expandedParts.delete(key)
     state.followMessages = isNearBottom()
   }
+  updateScrollToLatestButton()
 }, true)
 
 app.addEventListener("keydown", (event) => {
@@ -1664,6 +1695,10 @@ app.addEventListener("click", async (event) => {
     const sessionId = target.dataset.openSession
     setAgentDrawerOpen(false)
     await selectAndNavigate(instanceId, sessionId)
+    return
+  }
+  if (target.hasAttribute("data-scroll-latest")) {
+    jumpToLatest()
     return
   }
   if (target.hasAttribute("data-open-agents")) {
@@ -1863,6 +1898,8 @@ window.addEventListener("hashchange", () => {
   document.body.classList.remove("changes-open", "sessions-open", "agent-drawer-open")
   clearTimeout(state.refreshTimer)
   clearTimeout(state.changesTimer)
+  clearTimeout(state.scrollToLatestTimer)
+  state.scrollingToLatest = false
   const wasConversation = Boolean(state.routeSessionId)
   const route = routeFromHash()
   state.routeInstanceId = route.instanceId
@@ -1898,7 +1935,13 @@ document.addEventListener("visibilitychange", () => {
 })
 
 window.addEventListener("scroll", () => {
-  if (state.routeSessionId) state.followMessages = isNearBottom()
+  if (!state.routeSessionId) return
+  if (state.scrollingToLatest) {
+    scheduleJumpToLatestFinish()
+    return
+  }
+  state.followMessages = isNearBottom()
+  updateScrollToLatestButton()
 }, { passive: true })
 
 window.visualViewport?.addEventListener("resize", updateKeyboardInset)
