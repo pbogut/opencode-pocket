@@ -47,6 +47,7 @@ const state = {
   renderedAgentNavigation: "",
   attentionRequest: "",
   attentionCollapsed: false,
+  stopConfirmation: null,
   followMessages: true,
   scrollingToLatest: false,
   scrollToLatestTimer: null,
@@ -987,6 +988,18 @@ function renderConversationShell() {
         <div class="sessions-content" data-sessions-content></div>
       </section>
     </div>
+    <div class="stop-confirm-overlay" data-stop-confirm-overlay hidden>
+      <button type="button" class="stop-confirm-backdrop" data-cancel-stop aria-label="Keep agent working"></button>
+      <section class="stop-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="stop-confirm-title" aria-describedby="stop-confirm-description">
+        <div class="stop-confirm-icon" aria-hidden="true"><span></span></div>
+        <h2 id="stop-confirm-title" data-stop-confirm-title>Stop this agent?</h2>
+        <p id="stop-confirm-description">The current response in <strong data-stop-confirm-session></strong> will be interrupted. Work already completed will remain.</p>
+        <div class="stop-confirm-actions">
+          <button type="button" class="button primary" data-cancel-stop>Keep working</button>
+          <button type="button" class="button danger" data-confirm-stop>Stop agent</button>
+        </div>
+      </section>
+    </div>
     <div class="composer-wrap">
       <button type="button" class="scroll-latest" data-scroll-latest hidden>Scroll to bottom <span aria-hidden="true">↓</span></button>
       <section class="attention-sheet" data-attention-sheet hidden>
@@ -1207,6 +1220,28 @@ function updateChangesView() {
   }
 }
 
+function setStopConfirmation(value, restoreFocus = false) {
+  state.stopConfirmation = value
+  document.body.classList.toggle("stop-confirm-open", Boolean(value))
+  updateStopConfirmation()
+  if (value) {
+    requestAnimationFrame(() => app.querySelector("[data-cancel-stop]:not(.stop-confirm-backdrop)")?.focus())
+  } else if (restoreFocus) {
+    requestAnimationFrame(() => app.querySelector("[data-stop]")?.focus())
+  }
+}
+
+function updateStopConfirmation() {
+  const overlay = app.querySelector("[data-stop-confirm-overlay]")
+  if (!overlay) return
+  const pending = state.stopConfirmation
+  overlay.hidden = !pending
+  if (!pending) return
+  const session = sessionFor(pending.instanceId, pending.sessionId)
+  overlay.querySelector("[data-stop-confirm-title]").textContent = pending.retrying ? "Stop retrying?" : "Stop this agent?"
+  overlay.querySelector("[data-stop-confirm-session]").textContent = titleFor(session)
+}
+
 function updateConversation(session) {
   const instance = instanceFor(state.routeInstanceId)
   const status = statusFor(session)
@@ -1229,6 +1264,11 @@ function updateConversation(session) {
   stop.classList.toggle("retry", activity === "retry")
   stop.setAttribute("aria-label", activity === "retry" ? "Agent is retrying. Stop current request" : "Agent is working. Stop current request")
   stop.title = activity === "retry" ? "Agent is retrying. Stop current request" : "Agent is working. Stop current request"
+  if (!active && state.stopConfirmation?.instanceId === state.routeInstanceId && state.stopConfirmation.sessionId === state.routeSessionId) {
+    setStopConfirmation(null)
+  } else {
+    updateStopConfirmation()
+  }
   updateDictationButton()
   resizeComposerTextarea()
   updateAgentSelector()
@@ -1647,6 +1687,21 @@ app.addEventListener("toggle", (event) => {
 }, true)
 
 app.addEventListener("keydown", (event) => {
+  if (state.stopConfirmation && event.key === "Escape") {
+    event.preventDefault()
+    setStopConfirmation(null, true)
+    return
+  }
+  if (state.stopConfirmation && event.key === "Tab") {
+    const controls = [...app.querySelectorAll("[data-stop-confirm-overlay] .stop-confirm-actions button:not(:disabled)")]
+    if (!controls.length) return
+    const next = event.shiftKey ? controls.at(-1) : controls[0]
+    if (!controls.includes(document.activeElement) || (event.shiftKey && document.activeElement === controls[0]) || (!event.shiftKey && document.activeElement === controls.at(-1))) {
+      event.preventDefault()
+      next.focus()
+    }
+    return
+  }
   if (event.key === "Escape" && state.changesOpen) {
     event.preventDefault()
     setChangesOpen(false)
@@ -1699,6 +1754,28 @@ app.addEventListener("click", async (event) => {
   }
   if (target.hasAttribute("data-scroll-latest")) {
     jumpToLatest()
+    return
+  }
+  if (target.hasAttribute("data-cancel-stop")) {
+    setStopConfirmation(null, true)
+    return
+  }
+  if (target.hasAttribute("data-confirm-stop")) {
+    const pending = state.stopConfirmation
+    if (!pending) return
+    target.disabled = true
+    target.textContent = "Stopping…"
+    try {
+      await api(sessionApiPath(pending.instanceId, pending.sessionId, "abort"), { method: "POST" })
+      setStopConfirmation(null)
+      showToast("Stop sent")
+    } catch (error) {
+      showToast(error.message)
+      if (target.isConnected) {
+        target.disabled = false
+        target.textContent = "Stop agent"
+      }
+    }
     return
   }
   if (target.hasAttribute("data-open-agents")) {
@@ -1780,15 +1857,12 @@ app.addEventListener("click", async (event) => {
     return
   }
   if (target.hasAttribute("data-stop")) {
-    target.disabled = true
-    try {
-      await api(sessionApiPath(state.routeInstanceId, state.routeSessionId, "abort"), { method: "POST" })
-      showToast("Stop sent")
-    } catch (error) {
-      showToast(error.message)
-    } finally {
-      target.disabled = false
-    }
+    const session = sessionFor(state.routeInstanceId, state.routeSessionId)
+    setStopConfirmation({
+      instanceId: state.routeInstanceId,
+      sessionId: state.routeSessionId,
+      retrying: session?.status?.type === "retry",
+    })
     return
   }
   if (target.hasAttribute("data-cycle-agent")) {
@@ -1895,6 +1969,7 @@ app.addEventListener("submit", async (event) => {
 
 window.addEventListener("hashchange", () => {
   stopDictation(true)
+  setStopConfirmation(null)
   document.body.classList.remove("changes-open", "sessions-open", "agent-drawer-open")
   clearTimeout(state.refreshTimer)
   clearTimeout(state.changesTimer)

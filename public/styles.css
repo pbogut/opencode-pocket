@@ -190,6 +190,19 @@ body.agent-drawer-open { overflow: hidden; }
 .session-choice-main small { margin-top: 4px; color: var(--muted); font-size: 10px; }
 .sessions-empty { padding: 48px 20px; color: var(--muted); font-size: 13px; text-align: center; }
 body.sessions-open { overflow: hidden; }
+.stop-confirm-overlay { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom)); }
+.stop-confirm-overlay[hidden] { display: none; }
+.stop-confirm-backdrop { position: absolute; inset: 0; width: 100%; border: 0; background: rgb(0 0 0 / .72); padding: 0; backdrop-filter: blur(3px); }
+.stop-confirm-dialog { position: relative; width: min(100%, 390px); border: 1px solid #50383d; border-radius: 22px; background: linear-gradient(145deg, #1b171a, #121419 64%); box-shadow: 0 24px 70px rgb(0 0 0 / .62); padding: 22px; text-align: center; }
+.stop-confirm-icon { width: 46px; height: 46px; display: grid; margin: 0 auto 14px; place-items: center; border: 1px solid #694046; border-radius: 50%; background: #28191c; color: var(--danger); }
+.stop-confirm-icon span { width: 13px; height: 13px; border-radius: 3px; background: currentColor; }
+.stop-confirm-dialog h2 { margin: 0; font-size: 19px; }
+.stop-confirm-dialog p { margin: 9px 0 20px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.stop-confirm-dialog p strong { color: var(--text); }
+.stop-confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.stop-confirm-actions .button { min-height: 44px; }
+.stop-confirm-actions .button.danger { background: #28191c; }
+body.stop-confirm-open { overflow: hidden; }
 .notification-overlay { position: fixed; inset: 0; z-index: 70; display: flex; align-items: end; justify-content: center; }
 .notification-backdrop { position: absolute; inset: 0; width: 100%; border: 0; background: rgb(0 0 0 / .66); padding: 0; }
 .notification-drawer { position: relative; width: min(100%, 760px); overflow: hidden; border: 1px solid var(--line); border-bottom: 0; border-radius: 22px 22px 0 0; background: var(--bg); box-shadow: 0 -18px 55px rgb(0 0 0 / .55); }
