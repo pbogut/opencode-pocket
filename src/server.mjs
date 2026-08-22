@@ -18,8 +18,11 @@ const publicDir = fileURLToPath(new URL("../public/", import.meta.url))
 const sseClients = new Set()
 const devMode = process.argv.includes("--dev")
 const devServerId = `${process.pid}-${Date.now()}`
+const SHUTDOWN_GRACE_MS = 3_000
 let publicWatcher = null
 let reloadTimer = null
+let shuttingDown = false
+let forceShutdownTimer = null
 
 function json(res, status, data) {
   const body = JSON.stringify(data)
@@ -268,11 +271,31 @@ server.listen(config.port, config.host, () => {
   if (!config.openCodePassword) console.log("OpenCode auth: none configured in Pocket")
 })
 
-for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => {
-    manager.stop()
-    clearTimeout(reloadTimer)
-    publicWatcher?.close()
-    server.close(() => process.exit(0))
+function forceShutdown() {
+  clearTimeout(forceShutdownTimer)
+  for (const client of sseClients) client.destroy()
+  sseClients.clear()
+  server.closeAllConnections?.()
+  process.exit(0)
+}
+
+function shutdown() {
+  if (shuttingDown) return forceShutdown()
+  shuttingDown = true
+  manager.stop()
+  clearTimeout(reloadTimer)
+  publicWatcher?.close()
+  for (const client of sseClients) client.end()
+  sseClients.clear()
+  server.close((error) => {
+    clearTimeout(forceShutdownTimer)
+    process.exit(error ? 1 : 0)
   })
+  server.closeIdleConnections?.()
+  forceShutdownTimer = setTimeout(forceShutdown, SHUTDOWN_GRACE_MS)
+  forceShutdownTimer.unref()
+}
+
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, shutdown)
 }
