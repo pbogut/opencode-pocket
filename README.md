@@ -19,7 +19,7 @@ Current features:
 
 ## Requirements
 
-- Node.js 20 or newer
+- Node.js 20.12 or newer
 - OpenCode 1.18.20 or newer for optional TUI synchronization
 - a modern browser with EventSource support; service workers are needed for PWA shell caching
 - HTTPS or another secure context for phone-side PWA installation, notifications, and microphone access
@@ -88,14 +88,17 @@ OPENCODE_PASSWORD='strong-password' npm start
 
 ## 2. Configure Pocket
 
-Copy the example and adjust it if needed:
+Create dedicated production and development profiles without overwriting existing files:
 
 ```bash
-cp .env.example .env
-node --env-file=.env src/server.mjs
+make config
+$EDITOR ~/.config/opencode-pocket/env
+$EDITOR ~/.config/opencode-pocket/env.dev
 ```
 
-Node does not load `.env` automatically. You can also export variables or run `npm start` when defaults are sufficient.
+`npm start` and the installed `opencode-pocket` command load `env`. `npm run dev` and `make dev` load `env.dev` and enable watch/live-reload mode. Existing process environment variables take precedence over values from the profile.
+
+Set `OPENCODE_POCKET_PROFILE=test` or pass `--profile test` to load `env.test`. Set `OPENCODE_POCKET_CONFIG=/path/to/file` or pass `--config /path/to/file` to use an explicit file; an explicit file must exist. Missing default or named profile files are allowed and leave the built-in defaults in effect.
 
 Open <http://127.0.0.1:8787>. Pocket listens only on loopback by default.
 
@@ -184,6 +187,33 @@ Notifications are sent only for questions and permission requests, only while Po
 
 The service worker caches the application shell for reloads with a network-first strategy. API responses are never cached, and Pocket does not provide offline OpenCode control, background synchronization, or background push delivery.
 
+## Arch Linux Package
+
+The included `opencode-pocket-git` PKGBUILD installs Pocket as a per-user service while preserving host loopback, mDNS, and the shared plugin token path. Build and install it with:
+
+```bash
+make arch-install
+make config
+systemctl --user enable --now opencode-pocket
+```
+
+`make arch-install` builds the package before installing it. To build without installing, use `make package`. Packages are written to `dist/arch/packages`. `make package` builds the current working tree through a temporary source archive. The `-git` PKGBUILD defaults to the latest GitHub commit when used directly or published to AUR. `make arch-check` additionally validates the PKGBUILD and built package with `namcap`.
+
+Inspect the service with:
+
+```bash
+systemctl --user status opencode-pocket
+journalctl --user -u opencode-pocket -f
+```
+
+The package installs the TUI plugin at `/usr/lib/opencode-pocket/plugin/tui.js`. Use this file URL in `tui.json`:
+
+```json
+"file:///usr/lib/opencode-pocket/plugin/tui.js"
+```
+
+The service and direct launcher both load `~/.config/opencode-pocket/env`. The package only installs examples under `/usr/share/doc/opencode-pocket/`; it never writes into a user's home directory. `make config` creates user copies with mode `0600` and preserves any existing files.
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -195,7 +225,10 @@ The service worker caches the application shell for reloads with a network-first
 | `OPENCODE_DIRECTORY` | empty | Global directory default/fallback for OpenCode requests |
 | `OPENCODE_POCKET_TOKEN` | empty | Explicit TUI plugin bearer token |
 | `OPENCODE_POCKET_TOKEN_FILE` | XDG state path | Shared TUI plugin token file |
+| `OPENCODE_POCKET_CONFIG` | empty | Explicit launcher environment file; otherwise use the selected XDG profile |
+| `OPENCODE_POCKET_PROFILE` | empty | Load `env.NAME` instead of `env` |
 | `XDG_STATE_HOME` | `~/.local/state` | Base directory for the default plugin token path |
+| `XDG_CONFIG_HOME` | `~/.config` | Base directory for launcher environment profiles |
 | `HOST` | `127.0.0.1` | Pocket listen address |
 | `PORT` | `8787` | Pocket listen port |
 
@@ -266,12 +299,21 @@ Some OpenCode 1.17.x builds cannot reliably resolve permissions created by an in
 ## Development
 
 ```bash
+make help
+make config
+make verify
+make dev
+```
+
+The equivalent npm commands are:
+
+```bash
 npm test
 npm run check
 npm run dev
 ```
 
-`npm test` runs the backend, discovery, instance lifecycle, token, and bridge tests. `npm run check` performs JavaScript syntax checks; it is not a linter or type checker. Browser interactions, dictation, notifications, and PWA behavior still require manual browser testing.
+`npm test` runs the backend, discovery, instance lifecycle, token, launcher-profile, and bridge tests. `npm run check` performs JavaScript syntax checks; it is not a linter or type checker. Browser interactions, dictation, notifications, and PWA behavior still require manual browser testing.
 
 Plugin package checks:
 
@@ -281,3 +323,12 @@ npm --prefix packages/opencode-pocket-plugin run check
 ```
 
 `npm run dev` restarts the Node server when backend modules change and reloads connected browsers when backend or `public/` files change.
+
+Arch package helpers:
+
+```bash
+make package
+make arch-install
+make arch-check
+make package-clean
+```

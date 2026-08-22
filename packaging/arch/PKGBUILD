@@ -1,0 +1,64 @@
+# Maintainer: Pawel Bogut <pbogut@pbogut.me>
+
+pkgname=opencode-pocket-git
+_pkgname=opencode-pocket
+pkgver=0.1.0.r40.gdfe8586
+pkgrel=1
+pkgdesc="Mobile-first web control surface for OpenCode sessions"
+arch=('any')
+url="https://github.com/pbogut/opencode-pocket"
+license=('MIT')
+depends=('nodejs>=20.12.0')
+makedepends=('git' 'npm')
+optdepends=('tailscale: private HTTPS access from mobile devices')
+provides=('opencode-pocket')
+conflicts=('opencode-pocket')
+if [[ ${OPENCODE_POCKET_LOCAL_SOURCE:-0} == 1 ]]; then
+  source=("${_pkgname}-local.tar.gz")
+else
+  source=("${_pkgname}::git+https://github.com/pbogut/opencode-pocket.git")
+fi
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "${_pkgname}"
+  local version
+  version=$(node -p "require('./package.json').version")
+  if [[ ! -d .git ]]; then
+    printf '%s.r0.local' "${version}"
+    return
+  fi
+  printf '%s.r%s.g%s' "${version}" "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+}
+
+build() {
+  cd "${_pkgname}"
+  export npm_config_cache="${srcdir}/npm-cache"
+  npm ci --omit=dev --ignore-scripts
+}
+
+check() {
+  cd "${_pkgname}"
+  export npm_config_cache="${srcdir}/npm-cache"
+  npm test
+  npm run check
+  npm --prefix packages/opencode-pocket-plugin run check
+}
+
+package() {
+  cd "${_pkgname}"
+
+  install -d "${pkgdir}/usr/lib/${_pkgname}"
+  cp -a bin node_modules public src package.json "${pkgdir}/usr/lib/${_pkgname}/"
+
+  install -Dm644 packages/opencode-pocket-plugin/tui.js "${pkgdir}/usr/lib/${_pkgname}/plugin/tui.js"
+  install -Dm644 packaging/systemd/opencode-pocket.service "${pkgdir}/usr/lib/systemd/user/opencode-pocket.service"
+  install -Dm644 .env.example "${pkgdir}/usr/share/doc/${_pkgname}/env.example"
+  install -Dm644 .env.dev.example "${pkgdir}/usr/share/doc/${_pkgname}/env.dev.example"
+  install -Dm644 README.md "${pkgdir}/usr/share/doc/${_pkgname}/README.md"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${_pkgname}/LICENSE"
+
+  chmod 755 "${pkgdir}/usr/lib/${_pkgname}/bin/opencode-pocket.mjs"
+  install -d "${pkgdir}/usr/bin"
+  ln -s "/usr/lib/${_pkgname}/bin/opencode-pocket.mjs" "${pkgdir}/usr/bin/opencode-pocket"
+}

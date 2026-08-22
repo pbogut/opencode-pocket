@@ -4,14 +4,24 @@
   "private": true,
   "type": "module",
   "description": "Mobile-first web control surface for OpenCode sessions",
+  "license": "MIT",
+  "bin": {
+    "opencode-pocket": "bin/opencode-pocket.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pbogut/opencode-pocket.git"
+  },
+  "homepage": "https://github.com/pbogut/opencode-pocket#readme",
+  "bugs": "https://github.com/pbogut/opencode-pocket/issues",
   "scripts": {
-    "start": "node src/server.mjs",
-    "dev": "node --watch src/server.mjs --dev",
-    "test": "node --test",
-    "check": "node --check src/server.mjs && node --check src/discovery.mjs && node --check src/instances.mjs && node --check src/opencode.mjs && node --check src/plugin-token.mjs && node --check public/app.js"
+    "start": "node bin/opencode-pocket.mjs",
+    "dev": "node --watch bin/opencode-pocket.mjs --dev",
+    "test": "node --test test/*.test.mjs packages/opencode-pocket-plugin/tui.test.js",
+    "check": "node --check bin/opencode-pocket.mjs && node --check src/config-profile.mjs && node --check src/server.mjs && node --check src/discovery.mjs && node --check src/instances.mjs && node --check src/opencode.mjs && node --check src/plugin-token.mjs && node --check public/app.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.12.0"
   },
   "dependencies": {
     "bonjour-service": "^1.4.4"

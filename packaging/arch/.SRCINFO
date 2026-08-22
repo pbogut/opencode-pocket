@@ -1,0 +1,17 @@
+pkgbase = opencode-pocket-git
+	pkgdesc = Mobile-first web control surface for OpenCode sessions
+	pkgver = 0.1.0.r40.gdfe8586
+	pkgrel = 1
+	url = https://github.com/pbogut/opencode-pocket
+	arch = any
+	license = MIT
+	makedepends = git
+	makedepends = npm
+	depends = nodejs>=20.12.0
+	optdepends = tailscale: private HTTPS access from mobile devices
+	provides = opencode-pocket
+	conflicts = opencode-pocket
+	source = opencode-pocket::git+https://github.com/pbogut/opencode-pocket.git
+	sha256sums = SKIP
+
+pkgname = opencode-pocket-git
