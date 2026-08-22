@@ -118,6 +118,43 @@ test("delivers to Web Push and ntfy with independent preferences", async () => {
   })
 })
 
+test("clears ntfy blocker notifications when they are resolved", async () => {
+  const { fetchCalls, service } = await setup({ ntfyTopic: "pocket_secret", ntfyToken: "tk_secret" })
+  await service.updateNtfy({ enabled: true, preferences: { blockers: true } })
+
+  await service.handleEvent({ type: "question.asked", instanceId: "one", sessionId: "ses", requestId: "que_1" })
+  await service.updateNtfy({ enabled: false })
+  await service.handleEvent({ type: "question.replied", instanceId: "one", sessionId: "ses", requestId: "que_1" })
+  await service.handleEvent({ type: "question.replied", instanceId: "one", sessionId: "ses", requestId: "que_1" })
+
+  assert.equal(fetchCalls.length, 2)
+  const published = JSON.parse(fetchCalls[0][1].body)
+  assert.match(published.sequence_id, /^pocket-[-_A-Za-z0-9]{43}$/)
+  assert.equal(fetchCalls[1][0], `https://ntfy.sh/pocket_secret/${published.sequence_id}/clear`)
+  assert.equal(fetchCalls[1][1].method, "PUT")
+  assert.equal(fetchCalls[1][1].headers.Authorization, "Bearer tk_secret")
+})
+
+test("clears ntfy blockers after a Pocket restart", async () => {
+  const first = await setup({ ntfyTopic: "pocket_secret" })
+  await first.service.updateNtfy({ enabled: true, preferences: { blockers: true } })
+  await first.service.handleEvent({ type: "permission.asked", instanceId: "one", sessionId: "ses", requestId: "per_1" })
+
+  const restarted = new Notifications(first.config, {
+    webPush: first.webPush,
+    fetch: async (...args) => {
+      first.fetchCalls.push(args)
+      return { ok: true }
+    },
+  })
+  await restarted.start()
+  await restarted.handleEvent({ type: "permission.replied", instanceId: "one", sessionId: "ses", requestId: "per_1" })
+
+  assert.equal(first.fetchCalls.length, 2)
+  const sequenceId = JSON.parse(first.fetchCalls[0][1].body).sequence_id
+  assert.equal(first.fetchCalls[1][0], `https://ntfy.sh/pocket_secret/${sequenceId}/clear`)
+})
+
 test("persists global ntfy settings privately", async () => {
   const { config, service, webPush } = await setup({ ntfyTopic: "pocket_secret" })
   await service.updateNtfy({ enabled: false, preferences: { blockers: true, completed: false } })

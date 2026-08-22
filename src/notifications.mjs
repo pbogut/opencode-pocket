@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
 import webPush from "web-push"
@@ -19,6 +20,10 @@ function validSubscription(value) {
     return false
   }
   return typeof value.keys?.p256dh === "string" && typeof value.keys?.auth === "string"
+}
+
+function blockerSequenceId(blockerKey) {
+  return `pocket-${createHash("sha256").update(blockerKey).digest("base64url")}`
 }
 
 async function privateJson(file, value) {
@@ -48,6 +53,8 @@ export class Notifications {
     this.logger = options.logger || console
     this.subscriptions = new Map()
     this.notifiedBlockers = new Set()
+    this.sentNtfyBlockers = new Set()
+    this.clearedNtfyBlockers = new Set()
     this.writePromise = Promise.resolve()
     this.ntfyWritePromise = Promise.resolve()
     this.ntfySettings = { enabled: false, preferences: { ...DEFAULT_NOTIFICATION_PREFERENCES } }
@@ -162,6 +169,17 @@ export class Notifications {
 
     if (resolvedType) {
       this.notifiedBlockers.delete(blockerKey)
+      const sequenceId = blockerSequenceId(blockerKey)
+      const shouldClear = this.sentNtfyBlockers.has(sequenceId)
+        || Boolean(this.config.ntfyTopic && this.ntfySettings.enabled && this.ntfySettings.preferences.blockers)
+      if (!shouldClear || this.clearedNtfyBlockers.has(sequenceId)) return
+      try {
+        await this.clearNtfy(sequenceId)
+        this.sentNtfyBlockers.delete(sequenceId)
+        this.clearedNtfyBlockers.add(sequenceId)
+      } catch (error) {
+        this.logger.error("ntfy clear failed", error)
+      }
       return
     }
     if (blockerType) {
@@ -223,6 +241,7 @@ export class Notifications {
   async sendNtfy(kind, payload) {
     if (!this.config.ntfyTopic || !this.ntfySettings.enabled || !this.ntfySettings.preferences[kind]) return
     const click = this.config.publicUrl ? new URL(payload.url, `${this.config.publicUrl}/`).href : undefined
+    const sequenceId = kind === "blockers" ? blockerSequenceId(payload.tag.slice("blocker:".length)) : undefined
     const response = await this.fetch(this.config.ntfyUrl, {
       method: "POST",
       signal: AbortSignal.timeout(10_000),
@@ -235,11 +254,29 @@ export class Notifications {
         title: payload.title,
         message: payload.body,
         priority: kind === "blockers" ? 5 : 4,
+        ...(sequenceId ? { sequence_id: sequenceId } : {}),
         ...(click ? { click } : {}),
       }),
     })
-    if (response.ok) return
+    if (response.ok) {
+      if (sequenceId) this.sentNtfyBlockers.add(sequenceId)
+      return
+    }
     const detail = await response.text().catch(() => "")
     throw new Error(`ntfy delivery failed: ${response.status}${detail ? ` ${detail}` : ""}`)
+  }
+
+  async clearNtfy(sequenceId) {
+    const response = await this.fetch(
+      `${this.config.ntfyUrl}/${encodeURIComponent(this.config.ntfyTopic)}/${encodeURIComponent(sequenceId)}/clear`,
+      {
+        method: "PUT",
+        signal: AbortSignal.timeout(10_000),
+        headers: this.config.ntfyToken ? { Authorization: `Bearer ${this.config.ntfyToken}` } : {},
+      },
+    )
+    if (response.ok) return
+    const detail = await response.text().catch(() => "")
+    throw new Error(`ntfy clear failed: ${response.status}${detail ? ` ${detail}` : ""}`)
   }
 }
