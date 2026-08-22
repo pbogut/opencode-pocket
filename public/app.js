@@ -45,6 +45,7 @@ const state = {
   renderedChanges: "",
   renderedSessions: "",
   renderedAgentNavigation: "",
+  renderedNotifications: "",
   attentionRequest: "",
   attentionCollapsed: false,
   stopConfirmation: null,
@@ -961,6 +962,7 @@ function renderConversationShell() {
         <header class="agent-drawer-header">
           <div><h2 id="agent-drawer-title">Agents</h2><p data-agent-drawer-summary></p></div>
           <div class="agent-drawer-actions">
+            <button type="button" class="icon-button notification-button${state.notificationSubscription || state.ntfySettings.enabled ? " enabled" : ""}" data-notifications aria-label="Notification settings" title="Notification settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg></button>
             <button type="button" class="icon-button refresh-button" data-refresh aria-label="Refresh agents" title="Refresh"><span aria-hidden="true">↻</span></button>
             <button type="button" class="icon-button" data-close-agents aria-label="Close agents">×</button>
           </div>
@@ -1000,6 +1002,7 @@ function renderConversationShell() {
         </div>
       </section>
     </div>
+    <div data-notification-settings></div>
     <div class="composer-wrap">
       <button type="button" class="scroll-latest" data-scroll-latest hidden>Scroll to bottom <span aria-hidden="true">↓</span></button>
       <section class="attention-sheet" data-attention-sheet hidden>
@@ -1220,6 +1223,18 @@ function updateChangesView() {
   }
 }
 
+function updateNotificationSettingsView() {
+  for (const button of app.querySelectorAll("[data-notifications]")) {
+    button.classList.toggle("enabled", Boolean(state.notificationSubscription || state.ntfySettings.enabled))
+  }
+  const slot = app.querySelector("[data-notification-settings]")
+  if (!slot) return
+  const html = renderNotificationSettings()
+  if (state.renderedNotifications === html) return
+  slot.innerHTML = html
+  state.renderedNotifications = html
+}
+
 function setStopConfirmation(value, restoreFocus = false) {
   state.stopConfirmation = value
   document.body.classList.toggle("stop-confirm-open", Boolean(value))
@@ -1273,6 +1288,7 @@ function updateConversation(session) {
   resizeComposerTextarea()
   updateAgentSelector()
   updateChangesView()
+  updateNotificationSettingsView()
   updateSessionsView()
   updateAgentNavigation()
 
@@ -1317,6 +1333,7 @@ function render() {
     state.renderedChanges = ""
     state.renderedSessions = ""
     state.renderedAgentNavigation = ""
+    state.renderedNotifications = ""
     state.attentionRequest = ""
     state.attentionCollapsed = false
     state.followMessages = true
@@ -1702,6 +1719,12 @@ app.addEventListener("keydown", (event) => {
     }
     return
   }
+  if (event.key === "Escape" && state.notificationsOpen) {
+    event.preventDefault()
+    state.notificationsOpen = false
+    render()
+    return
+  }
   if (event.key === "Escape" && state.changesOpen) {
     event.preventDefault()
     setChangesOpen(false)
@@ -1808,9 +1831,11 @@ app.addEventListener("click", async (event) => {
     return
   }
   if (target.hasAttribute("data-notifications")) {
+    if (state.agentDrawerOpen) setAgentDrawerOpen(false)
     state.notificationsOpen = true
     render()
     loadNotificationSettings()
+    requestAnimationFrame(() => app.querySelector(".notification-header [data-close-notifications]")?.focus())
     return
   }
   if (target.hasAttribute("data-close-notifications")) {
