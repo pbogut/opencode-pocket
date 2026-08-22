@@ -254,33 +254,35 @@ body.stop-confirm-open { overflow: hidden; }
 .attention-sheet.collapsed .attention-sheet-body { display: none; }
 .attention-sheet .attention-card { margin: 0; border: 0; border-radius: 0; background: transparent; }
 .attention-sheet .attention-card + .attention-card { border-top: 1px solid #6c5828; }
-.composer { max-width: 732px; margin: 0 auto; display: flex; gap: 8px; align-items: end; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); padding: 8px; }
-.composer-input { min-width: 0; flex: 1; }
-.attachment-previews { display: flex; gap: 8px; overflow-x: auto; padding: 0 8px 8px; scrollbar-width: thin; }
+.composer { max-width: 732px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); padding: 8px; }
+.composer-input { display: contents; }
+.attachment-previews { grid-column: 1 / -1; display: flex; gap: 8px; overflow-x: auto; padding: 0 8px; scrollbar-width: thin; }
 .attachment-previews[hidden] { display: none; }
 .attachment-preview { position: relative; width: 64px; flex: 0 0 64px; margin: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: #0b0d10; }
 .attachment-preview img { display: block; width: 64px; height: 54px; object-fit: cover; }
 .attachment-preview figcaption { overflow: hidden; padding: 4px 5px; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .attachment-preview button { position: absolute; top: 3px; right: 3px; width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid rgb(255 255 255 / .35); border-radius: 50%; background: rgb(11 13 16 / .85); padding: 0; color: var(--text); font-size: 16px; line-height: 1; }
+.composer-toolbar { grid-column: 1 / -1; min-height: 30px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-left: 8px; }
 .mode-picker, .mode-picker label { display: flex; align-items: center; gap: 6px; width: max-content; }
-.mode-picker { margin: 0 8px; color: var(--muted); font-size: 11px; }
+.mode-picker { color: var(--muted); font-size: 11px; }
 .mode-picker select { max-width: 150px; border: 0; outline: none; background: transparent; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; }
 .mode-picker select:disabled { color: var(--muted); cursor: default; }
 .mode-picker option { background: var(--surface); color: var(--text); }
 .composer .mode-cycle { width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--accent); font-size: 15px; line-height: 1; }
 .composer .mode-cycle[hidden] { display: none; }
-.composer textarea { width: 100%; resize: none; max-height: 150px; min-height: 42px; border: 0; outline: none; background: transparent; color: var(--text); padding: 10px; }
+.composer textarea { min-width: 0; width: 100%; resize: none; max-height: 150px; min-height: 42px; border: 0; outline: none; background: transparent; color: var(--text); padding: 10px; }
 .composer button { border-radius: 12px; border: 0; background: var(--text); color: #111318; padding: 11px 15px; font-weight: 700; }
 .composer-actions { display: flex; gap: 8px; align-items: center; }
+.composer-tools { flex: none; display: flex; align-items: center; gap: 6px; }
 .composer .send-button { display: grid; width: 42px; height: 42px; padding: 0; place-items: center; }
 .composer .send-button:disabled { opacity: .45; }
 .send-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transform: translate(-1px, 1px); }
-.composer .dictate-button { display: grid; width: 42px; height: 42px; padding: 0; place-items: center; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); }
-.composer .attach-button { display: grid; width: 42px; height: 42px; padding: 0; place-items: center; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); }
+.composer .dictate-button { display: grid; width: 30px; height: 30px; padding: 0; place-items: center; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--muted); }
+.composer .attach-button { display: grid; width: 30px; height: 30px; padding: 0; place-items: center; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--muted); }
 .composer .attach-button:disabled { opacity: .4; }
-.attach-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.attach-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .composer .dictate-button[hidden] { display: none; }
-.dictate-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.dictate-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .composer .dictate-button.recording { border-color: #6b353b; background: #2b171a; color: var(--danger); animation: dictate-pulse 1.2s ease-in-out infinite alternate; }
 .composer .stop-button { position: relative; display: grid; width: 42px; height: 42px; padding: 0; place-items: center; overflow: hidden; border: 1px solid #694046; background: #28191c; color: var(--danger); }
 .composer .stop-button[hidden] { display: none; }

@@ -1032,20 +1032,24 @@ function renderConversationShell() {
       <form class="composer" data-composer>
         <div class="composer-input">
           <div class="attachment-previews" data-attachment-previews hidden></div>
-          <div class="mode-picker">
-            <label><span>Mode</span><select data-agent-select aria-label="OpenCode mode"><option value="">Loading modes…</option></select></label>
-            <button type="button" class="mode-cycle" data-cycle-agent hidden aria-label="Switch to next mode" title="Switch to next mode">↻</button>
+          <div class="composer-toolbar">
+            <div class="mode-picker">
+              <label><span>Mode</span><select data-agent-select aria-label="OpenCode mode"><option value="">Loading modes…</option></select></label>
+              <button type="button" class="mode-cycle" data-cycle-agent hidden aria-label="Switch to next mode" title="Switch to next mode">↻</button>
+            </div>
+            <div class="composer-tools">
+              <input type="file" data-image-input accept="image/gif,image/jpeg,image/png,image/webp" multiple hidden>
+              <button type="button" class="attach-button" data-attach-image aria-label="Attach images" title="Attach images">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20.5 11.5-8.8 8.8a6 6 0 0 1-8.5-8.5l9.6-9.6a4 4 0 0 1 5.7 5.7l-9.6 9.6a2 2 0 0 1-2.8-2.8l8.8-8.8"></path></svg>
+              </button>
+              <button type="button" class="dictate-button" data-dictate hidden aria-label="Start dictation" aria-pressed="false" title="Start dictation">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"></path></svg>
+              </button>
+            </div>
           </div>
           <textarea name="message" rows="1" placeholder="Message OpenCode…" autocomplete="off" aria-keyshortcuts="Enter" title="Enter to send, Shift+Enter for a new line">${esc(draft)}</textarea>
         </div>
         <div class="composer-actions">
-          <input type="file" data-image-input accept="image/gif,image/jpeg,image/png,image/webp" multiple hidden>
-          <button type="button" class="attach-button" data-attach-image aria-label="Attach images" title="Attach images">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20.5 11.5-8.8 8.8a6 6 0 0 1-8.5-8.5l9.6-9.6a4 4 0 0 1 5.7 5.7l-9.6 9.6a2 2 0 0 1-2.8-2.8l8.8-8.8"></path></svg>
-          </button>
-          <button type="button" class="dictate-button" data-dictate hidden aria-label="Start dictation" aria-pressed="false" title="Start dictation">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"></path></svg>
-          </button>
           <button type="button" class="stop-button" data-stop hidden aria-label="Stop current request" title="Stop current request">
             <span class="activity-ring" aria-hidden="true"></span>
             <span class="stop-square" aria-hidden="true"></span>
