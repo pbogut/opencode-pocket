@@ -26,6 +26,10 @@ function blockerSequenceId(blockerKey) {
   return `pocket-${createHash("sha256").update(blockerKey).digest("base64url")}`
 }
 
+function completionSequenceId(completionKey) {
+  return `pocket-${createHash("sha256").update(`completed:${completionKey}`).digest("base64url")}`
+}
+
 async function privateJson(file, value) {
   await mkdir(dirname(file), { recursive: true, mode: 0o700 })
   const temporary = `${file}.${process.pid}.${Date.now()}.tmp`
@@ -53,8 +57,9 @@ export class Notifications {
     this.logger = options.logger || console
     this.subscriptions = new Map()
     this.notifiedBlockers = new Set()
-    this.sentNtfyBlockers = new Set()
+    this.sentNtfySequences = new Set()
     this.clearedNtfyBlockers = new Set()
+    this.ntfyOperations = new Map()
     this.writePromise = Promise.resolve()
     this.ntfyWritePromise = Promise.resolve()
     this.ntfySettings = { enabled: false, preferences: { ...DEFAULT_NOTIFICATION_PREFERENCES } }
@@ -170,12 +175,12 @@ export class Notifications {
     if (resolvedType) {
       this.notifiedBlockers.delete(blockerKey)
       const sequenceId = blockerSequenceId(blockerKey)
-      const shouldClear = this.sentNtfyBlockers.has(sequenceId)
+      const shouldClear = this.sentNtfySequences.has(sequenceId)
         || Boolean(this.config.ntfyTopic && this.ntfySettings.enabled && this.ntfySettings.preferences.blockers)
       if (!shouldClear || this.clearedNtfyBlockers.has(sequenceId)) return
       try {
         await this.clearNtfy(sequenceId)
-        this.sentNtfyBlockers.delete(sequenceId)
+        this.sentNtfySequences.delete(sequenceId)
         this.clearedNtfyBlockers.add(sequenceId)
       } catch (error) {
         this.logger.error("ntfy clear failed", error)
@@ -195,12 +200,38 @@ export class Notifications {
     if (event.type === "session.completed") {
       const session = snapshot?.sessions?.find((item) => item.instanceId === event.instanceId && item.id === event.sessionId)
       if (session?.parentID || session?.parentId) return
+      const instanceId = event.instanceId || ""
+      const sessionId = event.sessionId || ""
+      const completedAt = event.completedAt || Date.now()
       return this.send("completed", {
         title: "OpenCode finished",
         body: "A task has finished.",
-        tag: `completed:${event.instanceId || ""}:${event.sessionId || ""}`,
+        tag: `completed:${instanceId}:${sessionId}`,
         url: this.eventUrl(event),
+        instanceId,
+        sessionId,
+        completedAt,
+        completionId: `${instanceId}:${sessionId}:${completedAt}`,
       })
+    }
+  }
+
+  async acknowledgeCompletion(instanceId, sessionId) {
+    if (typeof instanceId !== "string" || !instanceId.trim() || typeof sessionId !== "string" || !sessionId.trim()) {
+      const error = new Error("instanceId and sessionId are required")
+      error.statusCode = 400
+      throw error
+    }
+    const sequenceId = completionSequenceId(`${instanceId}:${sessionId}`)
+    const shouldClear = this.sentNtfySequences.has(sequenceId) || Boolean(this.config.ntfyTopic)
+    if (!shouldClear) return false
+    try {
+      await this.clearNtfy(sequenceId)
+      this.sentNtfySequences.delete(sequenceId)
+      return true
+    } catch (error) {
+      this.logger.error("ntfy completion clear failed", error)
+      return false
     }
   }
 
@@ -241,42 +272,62 @@ export class Notifications {
   async sendNtfy(kind, payload) {
     if (!this.config.ntfyTopic || !this.ntfySettings.enabled || !this.ntfySettings.preferences[kind]) return
     const click = this.config.publicUrl ? new URL(payload.url, `${this.config.publicUrl}/`).href : undefined
-    const sequenceId = kind === "blockers" ? blockerSequenceId(payload.tag.slice("blocker:".length)) : undefined
-    const response = await this.fetch(this.config.ntfyUrl, {
-      method: "POST",
-      signal: AbortSignal.timeout(10_000),
-      headers: {
-        "Content-Type": "application/json",
-        ...(this.config.ntfyToken ? { Authorization: `Bearer ${this.config.ntfyToken}` } : {}),
-      },
-      body: JSON.stringify({
-        topic: this.config.ntfyTopic,
-        title: payload.title,
-        message: payload.body,
-        priority: kind === "blockers" ? 5 : 4,
-        ...(sequenceId ? { sequence_id: sequenceId } : {}),
-        ...(click ? { click } : {}),
-      }),
-    })
-    if (response.ok) {
-      if (sequenceId) this.sentNtfyBlockers.add(sequenceId)
-      return
+    const key = kind === "completed"
+      ? `${payload.instanceId}:${payload.sessionId}`
+      : payload.tag.slice("blocker:".length)
+    const sequenceId = kind === "blockers"
+      ? blockerSequenceId(key)
+      : kind === "completed" ? completionSequenceId(key) : undefined
+    const publish = async () => {
+      const response = await this.fetch(this.config.ntfyUrl, {
+        method: "POST",
+        signal: AbortSignal.timeout(10_000),
+        headers: {
+          "Content-Type": "application/json",
+          ...(this.config.ntfyToken ? { Authorization: `Bearer ${this.config.ntfyToken}` } : {}),
+        },
+        body: JSON.stringify({
+          topic: this.config.ntfyTopic,
+          title: payload.title,
+          message: payload.body,
+          priority: kind === "blockers" ? 5 : 4,
+          ...(sequenceId ? { sequence_id: sequenceId } : {}),
+          ...(click ? { click } : {}),
+        }),
+      })
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "")
+        throw new Error(`ntfy delivery failed: ${response.status}${detail ? ` ${detail}` : ""}`)
+      }
+      if (sequenceId) this.sentNtfySequences.add(sequenceId)
     }
-    const detail = await response.text().catch(() => "")
-    throw new Error(`ntfy delivery failed: ${response.status}${detail ? ` ${detail}` : ""}`)
+    return sequenceId ? this.runNtfyOperation(sequenceId, publish) : publish()
   }
 
-  async clearNtfy(sequenceId) {
-    const response = await this.fetch(
-      `${this.config.ntfyUrl}/${encodeURIComponent(this.config.ntfyTopic)}/${encodeURIComponent(sequenceId)}/clear`,
-      {
-        method: "PUT",
-        signal: AbortSignal.timeout(10_000),
-        headers: this.config.ntfyToken ? { Authorization: `Bearer ${this.config.ntfyToken}` } : {},
-      },
-    )
-    if (response.ok) return
-    const detail = await response.text().catch(() => "")
-    throw new Error(`ntfy clear failed: ${response.status}${detail ? ` ${detail}` : ""}`)
+  async runNtfyOperation(sequenceId, operation) {
+    const previous = this.ntfyOperations.get(sequenceId) || Promise.resolve()
+    const current = previous.catch(() => {}).then(operation)
+    this.ntfyOperations.set(sequenceId, current)
+    try {
+      return await current
+    } finally {
+      if (this.ntfyOperations.get(sequenceId) === current) this.ntfyOperations.delete(sequenceId)
+    }
+  }
+
+  clearNtfy(sequenceId) {
+    return this.runNtfyOperation(sequenceId, async () => {
+      const response = await this.fetch(
+        `${this.config.ntfyUrl}/${encodeURIComponent(this.config.ntfyTopic)}/${encodeURIComponent(sequenceId)}/clear`,
+        {
+          method: "PUT",
+          signal: AbortSignal.timeout(10_000),
+          headers: this.config.ntfyToken ? { Authorization: `Bearer ${this.config.ntfyToken}` } : {},
+        },
+      )
+      if (response.ok) return
+      const detail = await response.text().catch(() => "")
+      throw new Error(`ntfy clear failed: ${response.status}${detail ? ` ${detail}` : ""}`)
+    })
   }
 }

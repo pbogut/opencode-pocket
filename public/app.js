@@ -1,3 +1,5 @@
+import { completionId, completionTag, isVisibleSession } from "./notification-state.js"
+
 const app = document.querySelector("#app")
 
 const DRAFTS_KEY = "opencode-pocket-drafts-v1"
@@ -241,6 +243,37 @@ async function api(path, options = {}) {
   if (text) { try { data = JSON.parse(text) } catch { data = text } }
   if (!response.ok) throw new Error(data?.error || `${response.status} ${response.statusText}`)
   return data
+}
+
+function acknowledgeVisibleCompletion(instanceId = state.routeInstanceId, sessionId = state.routeSessionId, completedAt) {
+  if (!isVisibleSession(document.visibilityState, state.routeInstanceId, state.routeSessionId, instanceId, sessionId)) return
+  const tag = completionTag(instanceId, sessionId)
+  const worker = "serviceWorker" in navigator ? navigator.serviceWorker.ready : null
+  if ("serviceWorker" in navigator) {
+    worker.then(async (registration) => {
+      const notifications = await registration.getNotifications?.({ tag }) || []
+      for (const notification of notifications) notification.close()
+      registration.active?.postMessage({
+        type: "clear-completion",
+        instanceId,
+        sessionId,
+        tag,
+        completionId: completionId(instanceId, sessionId, completedAt),
+      })
+    }).catch(() => {})
+  }
+  api("/api/notifications/completed", {
+    method: "PUT",
+    body: JSON.stringify({ instanceId, sessionId }),
+  }).then((result) => worker?.then((registration) => {
+    registration.active?.postMessage({
+      type: "clear-completion",
+      instanceId,
+      sessionId,
+      tag,
+      acknowledgedAt: result.acknowledgedAt,
+    })
+  })).catch(() => {})
 }
 
 function showToast(text) {
@@ -1854,7 +1887,14 @@ window.addEventListener("hashchange", () => {
   state.loadingDiffs.clear()
   render()
   if (wasConversation && !state.routeSessionId) requestAnimationFrame(() => window.scrollTo(0, 0))
-  if (state.routeSessionId) loadConversation()
+  if (state.routeSessionId) {
+    loadConversation()
+    acknowledgeVisibleCompletion()
+  }
+})
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") acknowledgeVisibleCompletion()
 })
 
 window.addEventListener("scroll", () => {
@@ -1888,6 +1928,7 @@ source.addEventListener("agent-event", (message) => {
     state.selectedAgents.set(conversationKey(event.instanceId, event.sessionId), switchedAgent)
     if (routeMatches(event.instanceId, event.sessionId)) render()
   }
+  if (event.type === "session.completed") acknowledgeVisibleCompletion(event.instanceId, event.sessionId, event.completedAt)
   if (event.type === "message.part" && event.part?.type === "patch" && routeMatches(event.instanceId, event.sessionId)) scheduleChangesRefresh()
   if (state.routeSessionId && routeMatches(event.instanceId, event.sessionId) && ["message.part", "message.updated", "session.status"].includes(event.type)) scheduleMessagesRefresh()
 })
@@ -1895,5 +1936,6 @@ source.addEventListener("agent-event", (message) => {
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {})
 loadState().then((navigated) => {
   if (!navigated && state.routeSessionId && sessionFor(state.routeInstanceId, state.routeSessionId)) loadConversation()
+  acknowledgeVisibleCompletion()
 })
 render()

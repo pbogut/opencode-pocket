@@ -139,6 +139,14 @@ const server = http.createServer(async (req, res) => {
       const input = await bodyJson(req)
       return json(res, 200, await notifications.updateNtfy(input))
     }
+    if (req.method === "PUT" && path === "/api/notifications/completed") {
+      const input = await bodyJson(req)
+      const acknowledgedAt = Date.now()
+      return json(res, 200, {
+        cleared: await notifications.acknowledgeCompletion(input?.instanceId, input?.sessionId),
+        acknowledgedAt,
+      })
+    }
     if ((req.method === "POST" || req.method === "DELETE") && path === "/api/plugin/tui-state") {
       if (!authorizedPlugin(req)) return json(res, 401, { error: "Unauthorized" })
       const input = await bodyJson(req)

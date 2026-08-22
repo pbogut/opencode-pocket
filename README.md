@@ -204,7 +204,7 @@ Keep Pocket and OpenCode bound to `127.0.0.1`, then expose Pocket with Tailscale
 
 After opening the HTTPS Pocket URL, install the PWA and open notification settings from the bell button. Enable notifications for that device, then choose whether to receive blockers, completed tasks, or both. Blockers cover questions and permission requests. A task is complete when its session moves from working or retrying to idle.
 
-Pocket supports Web Push and ntfy as independent notification destinations. Each browser stores its own blocker and completion choices. Configuring an ntfy topic makes that destination available; enable it and choose its events in the notification panel. This lets a phone use ntfy while a laptop uses browser notifications. Pocket clears ntfy blocker notifications after the question or permission is resolved. Pocket suppresses Web Push while one of its windows is visible. Notification text is generic on the lock screen; tapping it opens the affected session.
+Pocket supports Web Push and ntfy as independent notification destinations. Each browser stores its own blocker and completion choices. Configuring an ntfy topic makes that destination available; enable it and choose its events in the notification panel. This lets a phone use ntfy while a laptop uses browser notifications. Pocket clears ntfy blocker notifications after the question or permission is resolved. Opening a completed session in a visible Pocket window clears its ntfy and Web Push completion notifications; a background window leaves them in place. Web Push blockers are suppressed while any Pocket window is visible. Notification text is generic on the lock screen; tapping it opens the affected session.
 
 The service worker caches the application shell for reloads with a network-first strategy and handles push delivery. API responses are never cached, and Pocket does not provide offline OpenCode control or background synchronization.
 
@@ -280,6 +280,7 @@ GET  /api/notifications
 PUT  /api/notifications/subscription
 DELETE /api/notifications/subscription
 PUT  /api/notifications/ntfy
+PUT  /api/notifications/completed
 
 POST /api/instances/:instance/sessions
 GET  /api/instances/:instance/sessions/:session/messages

@@ -109,7 +109,10 @@ test("delivers to Web Push and ntfy with independent preferences", async () => {
   assert.equal(fetchCalls.length, 1)
   assert.equal(fetchCalls[0][0], "https://ntfy.sh")
   assert.equal(fetchCalls[0][1].headers.Authorization, "Bearer tk_secret")
-  assert.deepEqual(JSON.parse(fetchCalls[0][1].body), {
+  const ntfyMessage = JSON.parse(fetchCalls[0][1].body)
+  assert.match(ntfyMessage.sequence_id, /^pocket-[-_A-Za-z0-9]{43}$/)
+  delete ntfyMessage.sequence_id
+  assert.deepEqual(ntfyMessage, {
     topic: "pocket_secret",
     title: "OpenCode finished",
     message: "A task has finished.",
@@ -153,6 +156,59 @@ test("clears ntfy blockers after a Pocket restart", async () => {
   assert.equal(first.fetchCalls.length, 2)
   const sequenceId = JSON.parse(first.fetchCalls[0][1].body).sequence_id
   assert.equal(first.fetchCalls[1][0], `https://ntfy.sh/pocket_secret/${sequenceId}/clear`)
+})
+
+test("clears completed ntfy notifications when their session is acknowledged", async () => {
+  const { fetchCalls, service } = await setup({ ntfyTopic: "pocket_secret", ntfyToken: "tk_secret" })
+  await service.updateNtfy({ enabled: true, preferences: { completed: true } })
+
+  await service.handleEvent({ type: "session.completed", instanceId: "one", sessionId: "ses" })
+  const cleared = await service.acknowledgeCompletion("one", "ses")
+
+  assert.equal(cleared, true)
+  assert.equal(fetchCalls.length, 2)
+  const sequenceId = JSON.parse(fetchCalls[0][1].body).sequence_id
+  assert.equal(fetchCalls[1][0], `https://ntfy.sh/pocket_secret/${sequenceId}/clear`)
+  assert.equal(fetchCalls[1][1].method, "PUT")
+  assert.equal(fetchCalls[1][1].headers.Authorization, "Bearer tk_secret")
+})
+
+test("waits for completion publication before clearing it", async () => {
+  let releasePublish
+  const publishResponse = new Promise((resolve) => { releasePublish = resolve })
+  const { fetchCalls, service } = await setup({
+    ntfyTopic: "pocket_secret",
+    fetch: async (_url, options) => options.method === "POST" ? publishResponse : { ok: true },
+  })
+  await service.updateNtfy({ enabled: true, preferences: { completed: true } })
+
+  const publish = service.handleEvent({ type: "session.completed", instanceId: "one", sessionId: "ses" })
+  while (fetchCalls.length === 0) await new Promise((resolve) => setTimeout(resolve, 0))
+  const clear = service.acknowledgeCompletion("one", "ses")
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(fetchCalls.length, 1)
+
+  releasePublish({ ok: true })
+  await Promise.all([publish, clear])
+  assert.equal(fetchCalls.length, 2)
+  assert.equal(fetchCalls[1][1].method, "PUT")
+})
+
+test("does not contact ntfy for completion acknowledgements when ntfy is unconfigured", async () => {
+  const { fetchCalls, service } = await setup()
+
+  assert.equal(await service.acknowledgeCompletion("one", "ses"), false)
+  assert.equal(fetchCalls.length, 0)
+  await assert.rejects(service.acknowledgeCompletion("", "ses"), /instanceId and sessionId are required/)
+  await assert.rejects(service.acknowledgeCompletion("   ", "ses"), /instanceId and sessionId are required/)
+})
+
+test("clears prior completion notifications after ntfy is disabled", async () => {
+  const { fetchCalls, service } = await setup({ ntfyTopic: "pocket_secret" })
+
+  assert.equal(await service.acknowledgeCompletion("one", "ses"), true)
+  assert.equal(fetchCalls.length, 1)
+  assert.equal(fetchCalls[0][1].method, "PUT")
 })
 
 test("persists global ntfy settings privately", async () => {
