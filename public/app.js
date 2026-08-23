@@ -139,6 +139,11 @@ function esc(value = "") {
   return String(value).replace(/[&<>'"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[ch])
 }
 
+function titleCase(value = "") {
+  const text = String(value)
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
 function prettyTime(value) {
   if (!value) return ""
   const ms = value > 10_000_000_000 ? value : value * 1000
@@ -579,11 +584,18 @@ function renderMessages() {
   return `<div class="messages">${state.messages.map((message) => {
     const info = message?.info || message
     const role = info?.role || "assistant"
-    const plan = role === "user" && (info?.agent || info?.mode) === "plan"
+    const mode = info?.agent || info?.mode || ""
+    const plan = mode === "plan"
+    const model = role === "assistant" ? info?.modelID || info?.model?.modelID || "" : ""
+    const provider = role === "assistant" ? info?.providerID || info?.model?.providerID || "" : ""
+    const metadata = `<span class="message-role-name">${esc(titleCase(role))}</span>
+      ${mode ? `<span class="message-separator">·</span><span class="message-mode">${esc(titleCase(mode))}</span>` : ""}
+      ${model ? `<span class="message-separator">·</span><span class="message-model">${esc(model)}</span>` : ""}
+      ${provider ? `<span class="message-separator">·</span><span class="message-provider">${esc(provider)}</span>` : ""}`
     const parts = renderMessageParts(message)
     if (!parts) return ""
     return `<article class="message ${esc(role)}${plan ? " plan" : ""}">
-      <div class="message-role">${esc(role)}</div>
+      <div class="message-role">${metadata}</div>
       <div class="message-parts">${parts}</div>
     </article>`
   }).join("")}</div>`
@@ -1075,7 +1087,7 @@ function updateAgentSelector() {
   const key = JSON.stringify(agents)
   if (state.renderedAgents !== key) {
     select.innerHTML = agents.length
-      ? agents.map((agent) => `<option value="${esc(agent.name)}" title="${esc(agent.description)}">${esc(agent.name.charAt(0).toUpperCase() + agent.name.slice(1))}</option>`).join("")
+      ? agents.map((agent) => `<option value="${esc(agent.name)}" title="${esc(agent.description)}">${esc(titleCase(agent.name))}</option>`).join("")
       : `<option value="">Loading modes…</option>`
     state.renderedAgents = key
   }
