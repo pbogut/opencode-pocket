@@ -22,7 +22,6 @@ button { color: inherit; }
 .shell { max-width: 760px; min-height: 100vh; min-height: 100dvh; margin: 0 auto; padding: env(safe-area-inset-top) 14px env(safe-area-inset-bottom); }
 .topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); background: var(--bg); padding: 10px 0; }
 .topbar h1 { font-size: 20px; margin: 0; flex: 1; }
-.topbar-title { min-width: 0; flex: 1; }
 .conversation-topbar { display: block; }
 .topbar-row { display: flex; align-items: center; gap: 8px; }
 .topbar .session-title { min-width: 0; flex: 1; display: -webkit-box; overflow: hidden; font-size: 13px; line-height: 1.15; text-overflow: ellipsis; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
@@ -49,7 +48,6 @@ button { color: inherit; }
 .button.primary { background: var(--text); color: #111318; border-color: var(--text); font-weight: 700; }
 .button.danger { border-color: #5c3134; color: #ffb1b1; }
 .button:disabled { opacity: .45; cursor: default; }
-.banner { margin: 8px 0 14px; border: 1px solid #5a3a21; background: #2a1e12; border-radius: 12px; padding: 10px 12px; font-size: 13px; color: #ffdca2; }
 .agent-sort { min-height: 34px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: 4px 0 8px; color: var(--muted); font-size: 11px; }
 .agent-sort select { height: 32px; border: 1px solid var(--line); border-radius: 9px; outline: none; background: var(--surface); padding: 0 28px 0 9px; color: var(--text); font-size: 12px; font-weight: 700; cursor: pointer; }
 .agent-list { display: grid; gap: 8px; padding: 4px 0 24px; }
@@ -60,7 +58,7 @@ button { color: inherit; }
 .agent-title { font-weight: 700; font-size: 15px; }
 .agent-subtitle { color: var(--muted); font-size: 12px; margin-top: 4px; }
 .badge { border-radius: 999px; border: 1px solid var(--line); padding: 4px 8px; font-size: 11px; color: var(--muted); white-space: nowrap; }
-.badge.tui, .tui-sync-status { border-color: #365c52; background: #14251f; color: var(--ok); }
+.tui-sync-status { border-color: #365c52; background: #14251f; color: var(--ok); }
 .badge.busy { color: var(--warn); border-color: #6c5828; background: #2a2415; }
 .badge.retry { color: var(--warn); border-color: #6c5828; background: #2a2415; }
 .badge.attention { color: var(--danger); border-color: #6b353b; background: #2b171a; }
@@ -74,7 +72,7 @@ button { color: inherit; }
 .agent-count { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .agent-count i, .agent-alert i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: currentColor; }
 .agent-count.working { color: var(--warn); }
-.agent-count.blocked, .agent-alert.blocked { color: var(--danger); }
+.agent-alert.blocked { color: var(--danger); }
 .agent-count.idle { color: var(--ok); }
 .agent-count.idle i { border: 1.5px solid currentColor; background: transparent; }
 .agent-count.offline { color: var(--muted); }

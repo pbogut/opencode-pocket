@@ -6,15 +6,16 @@ Current features:
 
 - discovers multiple local OpenCode instances through the optional TUI plugin or mDNS
 - keeps sessions and requests isolated by OpenCode instance
-- shows working, retry, idle, blocked, and offline states in an agent dashboard and drawer
+- shows working, retry, idle, blocked, and offline states in the toolbar summary and instance drawer
 - receives live conversation updates and shows history, reasoning, tool details, and diffs
 - answers structured questions and permission requests
 - sends follow-up prompts and aborts running sessions
 - creates and switches sessions, with optional OpenCode TUI synchronization
-- cycles directly through agents blocked on questions or permissions
-- selects OpenCode modes and accepts browser voice dictation when supported
+- cycles directly through active sessions blocked on questions or permissions
+- selects OpenCode modes and models, including image-capability checks
+- accepts browser voice dictation when supported
 - preserves drafts per instance and session
-- installs as a PWA and shows blocker notifications while the page remains loaded
+- installs as a PWA and delivers background Web Push or ntfy blocker and completion notifications
 - supports keeping OpenCode on localhost so only Pocket needs to be exposed to your phone
 
 ## Requirements
@@ -164,28 +165,31 @@ When synchronization is active:
 - the session drawer lists the 10 newest root sessions and creates sessions in the current session's directory when that metadata is available, otherwise using `OPENCODE_DIRECTORY` or OpenCode's default
 - TUI navigation updates Pocket only while Pocket is following that instance
 - opening an instance follows its current TUI session, or selects its newest root session when the TUI is home
-- returning a followed TUI to its home screen returns Pocket to the Agents dashboard
+- returning a followed TUI to its home screen returns Pocket to the empty conversation landing
 - background instances update their markers without taking over Pocket navigation
 
 ## Using Pocket
 
-The Agents dashboard shows one card per OpenCode instance. Each card represents that instance's active root session: the session selected in a connected TUI when available, otherwise its newest root session. These cards are distinct from OpenCode's selectable modes in the conversation composer.
+Opening Pocket without a session selected shows the empty conversation landing. Use `Select instance` or the menu button to open the instance drawer. The drawer shows one card per OpenCode instance, representing its active root session: the session selected in a connected TUI when available, otherwise its newest root session. Offline instances and instances without an active session remain visible but cannot be opened. Cards can be sorted by path, recency, or status.
 
 From a conversation:
 
-- open the agent drawer with the menu button or a swipe from the left edge
+- open the instance drawer with the menu button or a swipe from the left edge
 - use the drawer refresh button to refresh sessions, statuses, questions, and permissions for known instances
 - read green `idle`, yellow `working` or `retry`, red `blocked`, and gray `offline` status indicators
-- tap the right-aligned `N blocked` button to open the next agent needing an answer; repeated taps cycle through blocked agents
+- tap the right-aligned `N blocked` button to open the next active session needing an answer; repeated taps cycle through blocked sessions
 - open the session drawer to switch among the 10 newest root sessions or create a session
 - select an OpenCode mode in the composer; the selection is used for subsequent prompts
+- open the model picker to search connected providers and select a model for the current session and mode
 - attach images from the picker or paste screenshots into the composer; remove unwanted previews before sending
 - open the changes view to inspect changed turns and load file diffs on demand
 - tap the microphone button for live dictation when the browser supports the Web Speech API
 
 Dictation appends interim and final speech to the current draft and never sends automatically. Sending a message or changing sessions stops recognition. Android uses non-continuous recognition, and microphone denial or recognition failures appear as a toast.
 
-Image prompts support JPEG, PNG, WebP, and GIF. A message can contain up to four images, with a 5 MiB limit per image and a 10 MiB combined limit. Images remain attached while switching sessions in the current browser tab, but unlike text drafts they are not stored across reloads. The selected OpenCode model must support image input.
+Model selections are tracked independently for each instance, session, and mode. An unsent browser selection remains local to that browser. After a PWA or TUI submits a real user message, the model recorded on that message becomes authoritative for the mode; OpenCode-generated synthetic continuation messages are ignored.
+
+Image prompts support JPEG, PNG, WebP, and GIF. A message can contain up to four images, with a 5 MiB limit per image and a 10 MiB combined limit. The browser also limits unsent image drafts across all sessions in the current tab to 10 MiB. Images remain attached while switching sessions in the current browser tab, but unlike text drafts they are not stored across reloads. Models explicitly marked as lacking image input are unavailable while images are attached and cannot receive image prompts.
 
 ## 4. Use Pocket on Android through Tailscale
 
@@ -205,7 +209,7 @@ OpenCode instances
 
 Keep Pocket and OpenCode bound to `127.0.0.1`, then expose Pocket with Tailscale Serve. This is the recommended architecture and avoids exposing OpenCode's powerful API directly to the LAN or internet. A manually configured `OPENCODE_URL` is not restricted to loopback, so secure any remote OpenCode server separately.
 
-After opening the HTTPS Pocket URL, install the PWA and open notification settings from the bell button. Enable notifications for that device, then choose whether to receive blockers, completed tasks, or both. Blockers cover questions and permission requests. A task is complete when its session moves from working or retrying to idle.
+After opening the HTTPS Pocket URL, install the PWA, open the instance drawer, and use its bell button to open notification settings. Enable notifications for that device, then choose whether to receive blockers, completed tasks, or both. Blockers cover questions and permission requests. Completion notifications apply to successful root-session transitions from working or retrying to idle; child sessions and sessions ending in error do not produce them.
 
 Pocket supports Web Push and ntfy as independent notification destinations. Each browser stores its own blocker and completion choices. Configuring an ntfy topic makes that destination available; enable it and choose its events in the notification panel. This lets a phone use ntfy while a laptop uses browser notifications. Pocket clears ntfy blocker notifications after the question or permission is resolved. Opening a completed session in a visible Pocket window clears its ntfy and Web Push completion notifications; a background window leaves them in place. Web Push blockers are suppressed while any Pocket window is visible. Notification text is generic on the lock screen; tapping it opens the affected session.
 
@@ -291,6 +295,7 @@ POST /api/instances/:instance/sessions/:session/messages
 GET  /api/instances/:instance/sessions/:session/changes
 GET  /api/instances/:instance/sessions/:session/diff?messageId=:message
 GET  /api/instances/:instance/sessions/:session/agents
+GET  /api/instances/:instance/sessions/:session/models
 POST /api/instances/:instance/sessions/:session/agent
 POST /api/instances/:instance/sessions/:session/abort
 POST /api/instances/:instance/sessions/:session/select
@@ -308,7 +313,8 @@ Important request and response details:
 - `POST /api/refresh` refreshes known instances; it does not restart or force an mDNS scan
 - `POST .../sessions` accepts optional `{ "directory": "..." }`, selects the created session in OpenCode, and returns `201`
 - `GET .../messages?limit=N` defaults to 100 messages and caps the limit at 300
-- `POST .../messages` accepts optional text and images as `{ "text": "...", "agent": "optional-mode", "images": [{ "mime": "image/png", "filename": "screen.png", "url": "data:image/png;base64,..." }] }` and returns `202`; at least text or one image is required
+- `POST .../messages` accepts optional text and images as `{ "text": "...", "agent": "optional-mode", "model": { "providerID": "openai", "modelID": "gpt-5.6-sol", "variant": "optional" }, "images": [{ "mime": "image/png", "filename": "screen.png", "url": "data:image/png;base64,..." }] }` and returns `202`; at least text or one image is required
+- `GET .../models` returns sanitized metadata for connected, non-deprecated models; provider credentials and model options are never exposed
 - `GET .../diff` requires the `messageId` query parameter
 - `POST .../agent` requires `{ "agent": "mode-name" }`
 - question replies require `{ "answers": [...] }`
@@ -320,6 +326,8 @@ The browser never receives the OpenCode password or plugin token. The plugin end
 ## OpenCode compatibility notes
 
 OpenCode is actively changing its server protocol. Pocket keeps OpenCode-facing code isolated in `src/opencode.mjs`, accepts both `properties` and `data` event envelopes, and accepts several request ID spellings.
+
+OpenCode may add synthetic user-role messages when it compacts a long conversation and continues work. Pocket hides parts marked `synthetic` and excludes fully synthetic messages from model reconciliation, while preserving user-authored parts that share a message with synthetic metadata.
 
 Directory routing matters. Question and permission replies include the directory learned from the session. Some OpenCode builds can return 200 without unblocking the correct project instance when the directory is omitted.
 

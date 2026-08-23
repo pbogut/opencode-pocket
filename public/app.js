@@ -21,7 +21,7 @@ const notificationRoute = new URLSearchParams(location.search).get("notification
 if (notificationRoute) history.replaceState(null, "", `${location.pathname}${location.hash}`)
 
 const state = {
-  snapshot: { connected: false, instances: [], sessions: [], questions: [], permissions: [] },
+  snapshot: { instances: [], sessions: [], questions: [], permissions: [] },
   routeInstanceId: initialRoute.instanceId,
   routeSessionId: initialRoute.sessionId,
   messages: [],
@@ -847,14 +847,14 @@ function renderAgentSummary(instances) {
     ["offline", counts.offline, "offline"],
   ].filter(([, count]) => count > 0)
   const summaryItems = counts.blocked ? [...countItems, ["blocked", counts.blocked]] : countItems
-  const summaryLabel = summaryItems.map(([label, count]) => `${count} ${label}`).join(", ") || "No agents"
+  const summaryLabel = summaryItems.map(([label, count]) => `${count} ${label}`).join(", ") || "No instances"
   const countsHtml = countItems.map(([label, count, className]) => `<span class="agent-count ${className}" title="${esc(`${count} ${label}`)}"><i aria-hidden="true"></i>${count}</span>`).join("")
   const currentIndex = blocked.findIndex(({ instance, session }) => routeMatches(instance.id, session.id))
   const nextBlocked = blocked[currentIndex >= 0 ? (currentIndex + 1) % blocked.length : 0]
   const alert = nextBlocked
-    ? `<button type="button" class="agent-alert blocked" data-open-session="${esc(nextBlocked.session.id)}" data-instance-id="${esc(nextBlocked.instance.id)}" aria-label="Open next blocked agent: ${esc(titleFor(nextBlocked.session))}" title="Open next blocked agent"><i aria-hidden="true"></i><strong>${counts.blocked} blocked</strong></button>`
+    ? `<button type="button" class="agent-alert blocked" data-open-session="${esc(nextBlocked.session.id)}" data-instance-id="${esc(nextBlocked.instance.id)}" aria-label="Open next blocked session: ${esc(titleFor(nextBlocked.session))}" title="Open next blocked session"><i aria-hidden="true"></i><strong>${counts.blocked} blocked</strong></button>`
     : ""
-  return `<button type="button" class="agent-summary" data-open-agents aria-label="Open agents. ${esc(summaryLabel)}">${countsHtml}</button>${alert}`
+  return `<button type="button" class="agent-summary" data-open-agents aria-label="Open instances. ${esc(summaryLabel)}">${countsHtml}</button>${alert}`
 }
 
 function renderAgentSort() {
@@ -863,7 +863,7 @@ function renderAgentSort() {
     ["recent", "Recency"],
     ["status", "Status"],
   ].map(([value, label]) => `<option value="${value}" ${state.agentSort === value ? "selected" : ""}>${label}</option>`).join("")
-  return `<label class="agent-sort"><span>Sort by</span><select data-agent-sort aria-label="Sort agents">${options}</select></label>`
+  return `<label class="agent-sort"><span>Sort by</span><select data-agent-sort aria-label="Sort instances">${options}</select></label>`
 }
 
 function sortedAgentItems(instances) {
@@ -882,7 +882,7 @@ function sortedAgentItems(instances) {
 }
 
 function renderAgentList(instances) {
-  if (!instances.length) return `<div class="empty">No OpenCode agents found.</div>`
+  if (!instances.length) return `<div class="empty">No OpenCode instances found.</div>`
   return `${renderAgentSort()}<div class="agent-list">${sortedAgentItems(instances).map((item) => {
     const { instance, session, statusDetails: status } = item
     const details = projectLabel(instance) || instance.serviceName || instanceTitle(instance)
@@ -1090,7 +1090,7 @@ function renderConversationShell(empty = false) {
   return `<div class="shell conversation${empty ? " empty-conversation" : ""}">
     <header class="topbar conversation-topbar">
       <div class="topbar-row">
-        <button class="icon-button agent-drawer-button" data-open-agents aria-label="Open agents" title="Open agents">☰</button>
+        <button class="icon-button agent-drawer-button" data-open-agents aria-label="Open instances" title="Open instances">☰</button>
         <h1 class="session-title" data-session-title>${empty ? "OpenCode Pocket" : ""}</h1>
         <div class="agent-radar" data-agent-radar></div>
         <div class="conversation-actions" data-conversation-actions ${empty ? "hidden" : ""}>
@@ -1111,14 +1111,14 @@ function renderConversationShell(empty = false) {
     </div>` : ""}</div>
     <div class="agent-swipe-edge" data-agent-swipe-edge aria-hidden="true"></div>
     <div class="agent-drawer-overlay" data-agent-drawer-overlay hidden>
-      <button type="button" class="agent-drawer-backdrop" data-close-agents aria-label="Close agents"></button>
+      <button type="button" class="agent-drawer-backdrop" data-close-agents aria-label="Close instances"></button>
       <aside class="agent-drawer" role="dialog" aria-modal="true" aria-labelledby="agent-drawer-title">
         <header class="agent-drawer-header">
-          <div><h2 id="agent-drawer-title">Agents</h2><p data-agent-drawer-summary></p></div>
+          <div><h2 id="agent-drawer-title">OpenCode instances</h2><p data-agent-drawer-summary></p></div>
           <div class="agent-drawer-actions">
             <button type="button" class="icon-button notification-button${state.notificationSubscription || state.ntfySettings.enabled ? " enabled" : ""}" data-notifications aria-label="Notification settings" title="Notification settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg></button>
-            <button type="button" class="icon-button refresh-button" data-refresh aria-label="Refresh agents" title="Refresh"><span aria-hidden="true">↻</span></button>
-            <button type="button" class="icon-button" data-close-agents aria-label="Close agents">×</button>
+            <button type="button" class="icon-button refresh-button" data-refresh aria-label="Refresh instances" title="Refresh"><span aria-hidden="true">↻</span></button>
+            <button type="button" class="icon-button" data-close-agents aria-label="Close instances">×</button>
           </div>
         </header>
         <div class="agent-drawer-content" data-agent-drawer-content></div>
@@ -1414,7 +1414,7 @@ function updateAgentNavigation() {
     counts.blocked ? `${counts.blocked} blocked` : "",
     counts.idle ? `${counts.idle} idle` : "",
     counts.offline ? `${counts.offline} offline` : "",
-  ].filter(Boolean).join(" · ") || "No agents"
+  ].filter(Boolean).join(" · ") || "No instances"
   const radarHtml = renderAgentSummary(instances)
   const drawerHtml = renderAgentList(instances)
   const key = `${radarHtml}\n${drawerHtml}`
