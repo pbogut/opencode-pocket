@@ -897,23 +897,6 @@ function renderAgentList(instances) {
   }).join("")}</div>`
 }
 
-function renderList() {
-  const instances = state.snapshot.instances || []
-  return `<div class="shell">
-    <header class="topbar">
-      <div class="topbar-title">
-        <h1>Agents</h1>
-        <div class="connection"><span class="dot ${state.snapshot.connected ? "connected" : ""}"></span>${state.snapshot.connected ? "live" : "reconnecting"}</div>
-      </div>
-      <button class="icon-button notification-button${state.notificationSubscription || state.ntfySettings.enabled ? " enabled" : ""}" data-notifications aria-label="Notification settings" title="Notification settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg></button>
-      <button class="icon-button refresh-button" data-refresh aria-label="Refresh agents" title="Refresh"><span aria-hidden="true">↻</span></button>
-    </header>
-    ${renderAgentList(instances)}
-    ${renderNotificationSettings()}
-    ${state.toast ? `<div class="toast">${esc(state.toast)}</div>` : ""}
-  </div>`
-}
-
 function notificationSupport() {
   return window.isSecureContext && "Notification" in window && "serviceWorker" in navigator && "PushManager" in window
 }
@@ -1102,15 +1085,15 @@ async function saveNtfySettings(update) {
   render()
 }
 
-function renderConversationShell() {
-  const draft = state.messageDrafts.get(conversationKey()) || ""
-  return `<div class="shell conversation">
+function renderConversationShell(empty = false) {
+  const draft = empty ? "" : state.messageDrafts.get(conversationKey()) || ""
+  return `<div class="shell conversation${empty ? " empty-conversation" : ""}">
     <header class="topbar conversation-topbar">
       <div class="topbar-row">
         <button class="icon-button agent-drawer-button" data-open-agents aria-label="Open agents" title="Open agents">☰</button>
-        <h1 class="session-title" data-session-title></h1>
+        <h1 class="session-title" data-session-title>${empty ? "OpenCode Pocket" : ""}</h1>
         <div class="agent-radar" data-agent-radar></div>
-        <div class="conversation-actions" data-conversation-actions>
+        <div class="conversation-actions" data-conversation-actions ${empty ? "hidden" : ""}>
           <button class="icon-button conversation-actions-button" data-toggle-conversation-actions aria-label="Conversation actions" aria-haspopup="menu" aria-expanded="false" title="Conversation actions"><span aria-hidden="true">⋮</span></button>
           <div class="conversation-actions-menu" data-conversation-actions-menu role="menu" hidden>
             <button type="button" class="conversation-action" data-open-sessions role="menuitem"><span>Sessions</span><small>Switch or create</small></button>
@@ -1118,10 +1101,14 @@ function renderConversationShell() {
           </div>
         </div>
       </div>
-      <span class="badge session-status-sticky idle" data-session-status>idle</span>
+      <span class="badge session-status-sticky idle" data-session-status ${empty ? "hidden" : ""}>idle</span>
     </header>
-    <div class="meta" data-session-meta></div>
-    <div data-messages></div>
+    <div class="meta" data-session-meta ${empty ? "hidden" : ""}></div>
+    <div data-messages>${empty ? `<div class="no-session">
+      <img src="/icon.svg" alt="" width="88" height="88">
+      <strong>Select an OpenCode instance</strong>
+      <button type="button" class="select-instance-button" data-open-agents><span aria-hidden="true">☰</span>Select instance</button>
+    </div>` : ""}</div>
     <div class="agent-swipe-edge" data-agent-swipe-edge aria-hidden="true"></div>
     <div class="agent-drawer-overlay" data-agent-drawer-overlay hidden>
       <button type="button" class="agent-drawer-backdrop" data-close-agents aria-label="Close agents"></button>
@@ -1181,7 +1168,7 @@ function renderConversationShell() {
       </section>
     </div>
     <div data-notification-settings></div>
-    <div class="composer-wrap">
+    <div class="composer-wrap" ${empty ? "hidden" : ""}>
       <button type="button" class="scroll-latest" data-scroll-latest hidden>Scroll to bottom <span aria-hidden="true">↓</span></button>
       <section class="attention-sheet" data-attention-sheet hidden>
         <button type="button" class="attention-sheet-toggle" data-toggle-attention aria-expanded="true">
@@ -1597,11 +1584,22 @@ function updateConversation(session) {
   app.querySelector("[data-toast]").innerHTML = state.toast ? `<div class="toast">${esc(state.toast)}</div>` : ""
 }
 
+function updateEmptyConversation() {
+  updateAgentNavigation()
+  updateNotificationSettingsView()
+  app.querySelector("[data-toast]").innerHTML = state.toast ? `<div class="toast">${esc(state.toast)}</div>` : ""
+}
+
 function render() {
   if (!state.routeSessionId) {
-    document.body.classList.remove("changes-open", "sessions-open", "agent-drawer-open")
-    state.viewKey = "list"
-    app.innerHTML = renderList()
+    document.body.classList.remove("changes-open", "sessions-open")
+    if (state.viewKey !== "conversation-empty") {
+      app.innerHTML = renderConversationShell(true)
+      state.viewKey = "conversation-empty"
+      state.renderedAgentNavigation = ""
+      state.renderedNotifications = ""
+    }
+    updateEmptyConversation()
     return
   }
 
