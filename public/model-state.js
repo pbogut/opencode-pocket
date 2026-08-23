@@ -8,12 +8,22 @@ export function modelRef(info) {
   return { providerID, modelID, ...(variant ? { variant } : {}) }
 }
 
+export function visibleMessageParts(message) {
+  return (Array.isArray(message?.parts) ? message.parts : []).filter((part) => part?.synthetic !== true)
+}
+
+export function isSyntheticUserMessage(message) {
+  const info = message?.info || message
+  const parts = Array.isArray(message?.parts) ? message.parts : []
+  return info?.role === "user" && parts.length > 0 && visibleMessageParts(message).length === 0
+}
+
 export function latestModels(messages) {
   const result = new Map()
   for (const message of messages || []) {
     const info = message?.info || message
     const agent = info?.agent || info?.mode
-    if (info?.role !== "user" || !agent || !info.id) continue
+    if (info?.role !== "user" || !agent || !info.id || isSyntheticUserMessage(message)) continue
     const model = modelRef(info)
     if (!model) continue
     const created = Number(info.time?.created || 0)

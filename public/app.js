@@ -1,6 +1,6 @@
 import { completionId, completionTag, isVisibleSession } from "./notification-state.js"
 import { normalizeAgentSort, sortAgentItems } from "./agent-sort.js"
-import { isStaleObservation, latestModels, modelRef, reconcileSelection, supportsImages } from "./model-state.js"
+import { isStaleObservation, latestModels, reconcileSelection, supportsImages, visibleMessageParts } from "./model-state.js"
 
 const app = document.querySelector("#app")
 
@@ -379,7 +379,7 @@ function modelSelectionKey(instanceId, sessionId, agent) {
 function reconcileObservedModel(instanceId, sessionId, agent, observed) {
   const key = modelSelectionKey(instanceId, sessionId, agent)
   const selected = state.selectedModels.get(key)
-  const previousObserved = state.observedModels.get(key) || (selected?.observedMessageId ? {
+  const previousObserved = state.observedModels.get(key) || (selected?.local && selected.observedMessageId ? {
     messageId: selected.observedMessageId,
     created: Number(selected.observedCreated || observed.created),
   } : null)
@@ -391,18 +391,6 @@ function reconcileObservedModel(instanceId, sessionId, agent, observed) {
 
 function reconcileMessageModels(instanceId, sessionId, messages) {
   for (const [agent, observed] of latestModels(messages)) reconcileObservedModel(instanceId, sessionId, agent, observed)
-  persistModelSelections()
-}
-
-function observeMessageModel(instanceId, sessionId, info) {
-  const model = modelRef(info)
-  const agent = info?.agent || info?.mode
-  if (info?.role !== "user" || !agent || !info.id || !model) return
-  reconcileObservedModel(instanceId, sessionId, agent, {
-    ...model,
-    messageId: info.id,
-    created: Number(info.time?.created || Date.now()),
-  })
   persistModelSelections()
 }
 
@@ -678,7 +666,7 @@ function renderChangesDrawer() {
 }
 
 function renderMessageParts(message) {
-  const parts = Array.isArray(message?.parts) ? message.parts : []
+  const parts = visibleMessageParts(message)
   return parts.map((part, index) => {
     if (part?.type === "text" && typeof part.text === "string") return `<div class="message-text">${esc(part.text)}</div>`
     if (part?.type === "reasoning") return renderReasoning(message, part, index)
@@ -2676,9 +2664,6 @@ source.addEventListener("state", (event) => {
 })
 source.addEventListener("agent-event", (message) => {
   const event = JSON.parse(message.data)
-  if (event.type === "message.updated" && event.instanceId && event.sessionId) {
-    observeMessageModel(event.instanceId, event.sessionId, event.message?.info)
-  }
   if ((event.type === "question.replied" || event.type === "question.rejected") && event.requestId) {
     state.questionAnswers.delete(scopedKey(event.instanceId, event.requestId))
     persistDrafts()
