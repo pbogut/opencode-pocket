@@ -56,6 +56,18 @@ function broadcast(type, payload) {
   for (const client of sseClients) client.write(frame)
 }
 
+function browserAgentEvent(event) {
+  const { raw, ...payload } = event
+  if (event.type === "message.part") {
+    return { ...payload, part: event.part?.type ? { type: event.part.type } : undefined }
+  }
+  if (event.type === "message.updated") {
+    const agent = event.message?.info?.agent
+    return { ...payload, message: agent ? { info: { agent } } : undefined }
+  }
+  return payload
+}
+
 function authorizedPlugin(req) {
   const value = req.headers.authorization || ""
   const token = value.startsWith("Bearer ") ? value.slice(7) : ""
@@ -74,7 +86,7 @@ if (devMode) {
 
 manager.on("state", (state) => broadcast("state", state))
 manager.on("event", (event) => {
-  broadcast("agent-event", event)
+  broadcast("agent-event", browserAgentEvent(event))
   notifications.handleEvent(event, manager.snapshot()).catch((error) => console.error("Notification handling failed", error))
 })
 manager.on("tui", (event) => broadcast("tui-state", event))

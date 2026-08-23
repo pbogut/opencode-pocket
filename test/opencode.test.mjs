@@ -68,3 +68,38 @@ test("session errors suppress completion", () => {
 
   assert.equal(events.some((event) => event.type === "session.completed"), false)
 })
+
+test("state-changing events publish updated state before the event", () => {
+  const bridge = new OpenCodeBridge({})
+  bridge.sessions.set("ses_1", { id: "ses_1" })
+  const order = []
+  bridge.on("state", (state) => {
+    order.push("state")
+    assert.equal(state.questions[0]?.id, "que_1")
+  })
+  bridge.on("event", () => order.push("event"))
+
+  bridge.handleEvent({
+    type: "question.asked",
+    properties: { id: "que_1", sessionID: "ses_1", questions: [{ question: "Pick" }] },
+  })
+
+  assert.deepEqual(order, ["state", "event"])
+})
+
+test("message events do not publish unchanged state snapshots", () => {
+  const bridge = new OpenCodeBridge({})
+  bridge.sessions.set("ses_1", { id: "ses_1" })
+  let stateEvents = 0
+  let agentEvents = 0
+  bridge.on("state", () => { stateEvents += 1 })
+  bridge.on("event", () => { agentEvents += 1 })
+
+  bridge.handleEvent({
+    type: "message.part.delta",
+    properties: { part: { sessionID: "ses_1", messageID: "msg_1", type: "text" }, delta: "hi" },
+  })
+
+  assert.equal(stateEvents, 0)
+  assert.equal(agentEvents, 1)
+})

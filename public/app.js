@@ -9,6 +9,7 @@ const IMAGE_MIME_TYPES = new Set(["image/gif", "image/jpeg", "image/png", "image
 const MAX_IMAGE_COUNT = 4
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_IMAGE_TOTAL_BYTES = 10 * 1024 * 1024
+const MESSAGE_REFRESH_INTERVAL = 250
 const savedDrafts = loadDrafts()
 const initialRoute = routeFromHash()
 const notificationRoute = new URLSearchParams(location.search).get("notification") === "1"
@@ -47,6 +48,7 @@ const state = {
   questionAnswers: new Map(draftEntries(savedDrafts.questions).filter(([, value]) => Array.isArray(value))),
   toast: "",
   refreshTimer: null,
+  messagesRefreshPending: false,
   viewKey: "",
   renderedMessages: "",
   renderedAttention: "",
@@ -301,11 +303,11 @@ function showToast(text) {
   showToast.timer = setTimeout(() => { state.toast = ""; render() }, 2600)
 }
 
-async function loadState() {
+async function loadState({ quiet = false } = {}) {
   try {
     return applySnapshot(await api("/api/state"))
   } catch (error) {
-    showToast(error.message)
+    if (!quiet) showToast(error.message)
     return false
   }
 }
@@ -412,9 +414,23 @@ async function loadConversation() {
   }
 }
 
+async function flushMessagesRefresh() {
+  state.refreshTimer = null
+  if (!state.messagesRefreshPending) return
+  if (state.loadingMessages) {
+    state.refreshTimer = setTimeout(flushMessagesRefresh, MESSAGE_REFRESH_INTERVAL)
+    return
+  }
+  state.messagesRefreshPending = false
+  await loadMessages({ quiet: true })
+  if (state.messagesRefreshPending && !state.refreshTimer) {
+    state.refreshTimer = setTimeout(flushMessagesRefresh, MESSAGE_REFRESH_INTERVAL)
+  }
+}
+
 function scheduleMessagesRefresh() {
-  clearTimeout(state.refreshTimer)
-  state.refreshTimer = setTimeout(() => loadMessages({ quiet: true }), 180)
+  state.messagesRefreshPending = true
+  if (!state.refreshTimer) state.refreshTimer = setTimeout(flushMessagesRefresh, MESSAGE_REFRESH_INTERVAL)
 }
 
 function scheduleChangesRefresh() {
@@ -2306,6 +2322,8 @@ window.addEventListener("hashchange", () => {
   clearTimeout(state.changesTimer)
   clearTimeout(state.scrollToLatestTimer)
   state.scrollingToLatest = false
+  state.refreshTimer = null
+  state.messagesRefreshPending = false
   const wasConversation = Boolean(state.routeSessionId)
   const route = routeFromHash()
   state.routeInstanceId = route.instanceId
@@ -2337,8 +2355,26 @@ window.addEventListener("hashchange", () => {
   }
 })
 
+let stateRecoveryTimer = 0
+let stateRecoveryInFlight = false
+
+function scheduleStateRecovery(delay = 0) {
+  clearTimeout(stateRecoveryTimer)
+  stateRecoveryTimer = setTimeout(async () => {
+    if (document.visibilityState !== "visible" || stateRecoveryInFlight) return
+    stateRecoveryInFlight = true
+    try {
+      await loadState({ quiet: true })
+    } finally {
+      stateRecoveryInFlight = false
+    }
+  }, delay)
+}
+
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") acknowledgeVisibleCompletion()
+  if (document.visibilityState !== "visible") return
+  acknowledgeVisibleCompletion()
+  scheduleStateRecovery()
 })
 
 window.addEventListener("scroll", () => {
@@ -2355,7 +2391,13 @@ window.visualViewport?.addEventListener("resize", revealComposerAfterViewportRes
 window.addEventListener("resize", revealComposerAfterViewportResize)
 
 let devServerId = ""
+let sourceHasOpened = false
 const source = new EventSource("/api/events")
+source.addEventListener("open", () => {
+  if (sourceHasOpened) scheduleStateRecovery()
+  sourceHasOpened = true
+})
+source.addEventListener("error", () => scheduleStateRecovery(500))
 source.addEventListener("dev-server", (event) => {
   const nextId = JSON.parse(event.data).id
   if (devServerId && devServerId !== nextId) return location.reload()
