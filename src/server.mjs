@@ -8,7 +8,7 @@ import { loadConfig } from "./config.mjs"
 import { InstanceManager } from "./instances.mjs"
 import { loadPluginToken } from "./plugin-token.mjs"
 import { Notifications } from "./notifications.mjs"
-import { MAX_MESSAGE_BODY_BYTES, validateMessageInput } from "./message-input.mjs"
+import { MAX_MESSAGE_BODY_BYTES, validateImageModelSupport, validateMessageInput } from "./message-input.mjs"
 
 const config = loadConfig()
 const pluginToken = await loadPluginToken(config)
@@ -62,8 +62,24 @@ function browserAgentEvent(event) {
     return { ...payload, part: event.part?.type ? { type: event.part.type } : undefined }
   }
   if (event.type === "message.updated") {
-    const agent = event.message?.info?.agent
-    return { ...payload, message: agent ? { info: { agent } } : undefined }
+    const info = event.message?.info
+    if (!info) return payload
+    return {
+      ...payload,
+      message: {
+        info: {
+          id: info.id,
+          role: info.role,
+          agent: info.agent,
+          mode: info.mode,
+          model: info.model,
+          variant: info.variant,
+          providerID: info.providerID,
+          modelID: info.modelID,
+          time: info.time,
+        },
+      },
+    }
   }
   return payload
 }
@@ -209,7 +225,8 @@ const server = http.createServer(async (req, res) => {
       const bridge = manager.bridge(decodeURIComponent(match[1]))
       const sid = decodeURIComponent(match[2])
       const input = validateMessageInput(await bodyJson(req, MAX_MESSAGE_BODY_BYTES))
-      await bridge.sendMessage(sid, input.text, input.agent, input.images)
+      if (input.model && input.images.length > 0) validateImageModelSupport(input, await bridge.listModels(sid))
+      await bridge.sendMessage(sid, input.text, input.agent, input.images, input.model)
       return json(res, 202, { ok: true })
     }
 
@@ -228,6 +245,11 @@ const server = http.createServer(async (req, res) => {
     match = path.match(/^\/api\/instances\/([^/]+)\/sessions\/([^/]+)\/agents$/)
     if (match && req.method === "GET") {
       return json(res, 200, await manager.bridge(decodeURIComponent(match[1])).listAgents(decodeURIComponent(match[2])))
+    }
+
+    match = path.match(/^\/api\/instances\/([^/]+)\/sessions\/([^/]+)\/models$/)
+    if (match && req.method === "GET") {
+      return json(res, 200, await manager.bridge(decodeURIComponent(match[1])).listModels(decodeURIComponent(match[2])))
     }
 
     match = path.match(/^\/api\/instances\/([^/]+)\/sessions\/([^/]+)\/agent$/)

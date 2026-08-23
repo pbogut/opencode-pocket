@@ -42,11 +42,34 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
     if (url.pathname === "/permission" && req.method === "GET") return sendJson(res, permission ? [permission] : [])
     if (url.pathname === "/agent" && req.method === "GET") {
       return sendJson(res, [
-        { name: "build", description: "Build mode", mode: "primary", permission: [], options: {} },
+        { name: "build", description: "Build mode", mode: "primary", model: { providerID: "openai", modelID: "gpt-5.6-sol" }, permission: [], options: {} },
         { name: "review", description: "Review changes", mode: "all", permission: [], options: {} },
         { name: "explore", mode: "subagent", permission: [], options: {} },
         { name: "summary", mode: "primary", hidden: true, permission: [], options: {} },
       ])
+    }
+    if (url.pathname === "/provider" && req.method === "GET") {
+      return sendJson(res, {
+        connected: ["openai"],
+        all: [
+          {
+            id: "openai",
+            name: "OpenAI",
+            secret: "must-not-leak",
+            models: {
+              "gpt-5.6-sol": {
+                id: "gpt-5.6-sol",
+                name: "GPT-5.6 Sol",
+                status: "active",
+                capabilities: { input: { image: true } },
+                variants: { high: {} },
+                options: { apiKey: "must-not-leak" },
+              },
+            },
+          },
+          { id: "disconnected", models: { hidden: { id: "hidden" } } },
+        ],
+      })
     }
     if (url.pathname === "/session/ses_1/message" && req.method === "GET") {
       return sendJson(res, [
@@ -138,9 +161,18 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
   assert.equal(new URLSearchParams(diffCall.search).get("messageID"), "msg_user")
   assert.equal(new URLSearchParams(diffCall.search).get("directory"), projectDir)
   assert.deepEqual(await bridge.listAgents("ses_1"), [
-    { name: "build", description: "Build mode", mode: "primary", color: "" },
-    { name: "review", description: "Review changes", mode: "all", color: "" },
+    { name: "build", description: "Build mode", mode: "primary", color: "", model: { providerID: "openai", modelID: "gpt-5.6-sol" } },
+    { name: "review", description: "Review changes", mode: "all", color: "", model: null },
   ])
+  assert.deepEqual(await bridge.listModels("ses_1"), [{
+    providerID: "openai",
+    providerName: "OpenAI",
+    modelID: "gpt-5.6-sol",
+    name: "GPT-5.6 Sol",
+    status: "active",
+    supportsImages: true,
+    variants: ["high"],
+  }])
   await bridge.switchAgent("ses_1", "review")
   const agentCall = calls.find((call) => call.path === "/api/session/ses_1/agent")
   assert.deepEqual(agentCall.body, { agent: "review" })
@@ -180,7 +212,7 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
   assert.equal(new URLSearchParams(permissionCall.search).get("directory"), projectDir)
 
   const image = { type: "file", mime: "image/png", filename: "screen.png", url: "data:image/png;base64,aW1hZ2U=" }
-  await bridge.sendMessage("ses_1", "Continue", "review", [image])
+  await bridge.sendMessage("ses_1", "Continue", "review", [image], { providerID: "opencode-go", modelID: "kimi-k3", variant: "max" })
   await bridge.sendMessage("ses_1", "", "", [image])
   const promptCalls = calls.filter((call) => call.path === "/session/ses_1/prompt_async")
   assert.deepEqual(promptCalls[0].body, {
@@ -189,6 +221,8 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
       { type: "file", mime: "image/png", filename: "screen.png", url: "data:image/png;base64,aW1hZ2U=" },
     ],
     agent: "review",
+    model: { providerID: "opencode-go", modelID: "kimi-k3" },
+    variant: "max",
   })
   assert.deepEqual(promptCalls[1].body, {
     parts: [{ type: "file", mime: "image/png", filename: "screen.png", url: "data:image/png;base64,aW1hZ2U=" }],

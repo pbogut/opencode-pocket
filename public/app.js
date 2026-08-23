@@ -1,10 +1,12 @@
 import { completionId, completionTag, isVisibleSession } from "./notification-state.js"
 import { normalizeAgentSort, sortAgentItems } from "./agent-sort.js"
+import { isStaleObservation, latestModels, modelRef, reconcileSelection, supportsImages } from "./model-state.js"
 
 const app = document.querySelector("#app")
 
 const DRAFTS_KEY = "opencode-pocket-drafts-v1"
 const AGENT_SORT_KEY = "opencode-pocket-agent-sort-v1"
+const MODEL_SELECTIONS_KEY = "opencode-pocket-model-selections-v1"
 const BOTTOM_THRESHOLD = 80
 const DEFAULT_NOTIFICATION_PREFERENCES = { blockers: true, completed: true }
 const IMAGE_MIME_TYPES = new Set(["image/gif", "image/jpeg", "image/png", "image/webp"])
@@ -13,6 +15,7 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_IMAGE_TOTAL_BYTES = 10 * 1024 * 1024
 const MESSAGE_REFRESH_INTERVAL = 250
 const savedDrafts = loadDrafts()
+const savedModelSelections = loadModelSelections()
 const initialRoute = routeFromHash()
 const notificationRoute = new URLSearchParams(location.search).get("notification") === "1"
 if (notificationRoute) history.replaceState(null, "", `${location.pathname}${location.hash}`)
@@ -29,6 +32,13 @@ const state = {
   switchingAgentSession: "",
   composerSelection: null,
   selectedAgents: new Map(),
+  selectedModels: new Map(Object.entries(savedModelSelections)),
+  observedModels: new Map(),
+  models: [],
+  modelSessionId: "",
+  loadingModelsSession: "",
+  modelPickerOpen: false,
+  modelQuery: "",
   changes: [],
   changesSessionId: "",
   loadingChangesSession: "",
@@ -112,6 +122,19 @@ function loadAgentSort() {
 
 function persistAgentSort() {
   try { localStorage.setItem(AGENT_SORT_KEY, state.agentSort) } catch {}
+}
+
+function loadModelSelections() {
+  try {
+    const value = JSON.parse(localStorage.getItem(MODEL_SELECTIONS_KEY) || "{}")
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {}
+  } catch {
+    return {}
+  }
+}
+
+function persistModelSelections() {
+  try { localStorage.setItem(MODEL_SELECTIONS_KEY, JSON.stringify(Object.fromEntries(state.selectedModels))) } catch {}
 }
 
 function decodeRoutePart(value) {
@@ -335,7 +358,10 @@ async function loadMessages({ quiet = false } = {}) {
   if (!quiet) render()
   try {
     const messages = await api(`${sessionApiPath(iid, sid, "messages")}?limit=120`)
-    if (routeMatches(iid, sid)) state.messages = messages
+    if (routeMatches(iid, sid)) {
+      state.messages = messages
+      reconcileMessageModels(iid, sid, messages)
+    }
   } catch (error) {
     if (routeMatches(iid, sid)) showToast(error.message)
   } finally {
@@ -344,6 +370,40 @@ async function loadMessages({ quiet = false } = {}) {
       render()
     }
   }
+}
+
+function modelSelectionKey(instanceId, sessionId, agent) {
+  return scopedKey(instanceId, sessionId, agent)
+}
+
+function reconcileObservedModel(instanceId, sessionId, agent, observed) {
+  const key = modelSelectionKey(instanceId, sessionId, agent)
+  const selected = state.selectedModels.get(key)
+  const previousObserved = state.observedModels.get(key) || (selected?.observedMessageId ? {
+    messageId: selected.observedMessageId,
+    created: Number(selected.observedCreated || observed.created),
+  } : null)
+  if (isStaleObservation(observed, previousObserved)) return
+  const next = reconcileSelection(selected, observed, previousObserved)
+  state.observedModels.set(key, observed)
+  if (next) state.selectedModels.set(key, next)
+}
+
+function reconcileMessageModels(instanceId, sessionId, messages) {
+  for (const [agent, observed] of latestModels(messages)) reconcileObservedModel(instanceId, sessionId, agent, observed)
+  persistModelSelections()
+}
+
+function observeMessageModel(instanceId, sessionId, info) {
+  const model = modelRef(info)
+  const agent = info?.agent || info?.mode
+  if (info?.role !== "user" || !agent || !info.id || !model) return
+  reconcileObservedModel(instanceId, sessionId, agent, {
+    ...model,
+    messageId: info.id,
+    created: Number(info.time?.created || Date.now()),
+  })
+  persistModelSelections()
 }
 
 function agentFromMessages() {
@@ -374,6 +434,25 @@ async function loadAgents() {
     render()
   } catch (error) {
     if (routeMatches(iid, sid)) showToast(error.message)
+  }
+}
+
+async function loadModels() {
+  const iid = state.routeInstanceId
+  const sid = state.routeSessionId
+  const key = conversationKey(iid, sid)
+  if (!key || state.loadingModelsSession === key) return
+  state.loadingModelsSession = key
+  try {
+    const models = await api(sessionApiPath(iid, sid, "models"))
+    if (!routeMatches(iid, sid)) return
+    state.models = Array.isArray(models) ? models : []
+    state.modelSessionId = key
+    render()
+  } catch (error) {
+    if (routeMatches(iid, sid)) showToast(error.message)
+  } finally {
+    if (state.loadingModelsSession === key) state.loadingModelsSession = ""
   }
 }
 
@@ -423,7 +502,7 @@ async function loadConversation() {
   state.loadingConversations.add(key)
   try {
     await loadMessages()
-    await Promise.all([loadAgents(), loadChanges()])
+    await Promise.all([loadAgents(), loadModels(), loadChanges()])
   } finally {
     state.loadingConversations.delete(key)
   }
@@ -1102,6 +1181,17 @@ function renderConversationShell() {
         </div>
       </section>
     </div>
+    <div class="model-overlay" data-model-overlay hidden>
+      <button type="button" class="model-backdrop" data-close-models aria-label="Close model selection"></button>
+      <section class="model-drawer" role="dialog" aria-modal="true" aria-labelledby="model-title">
+        <header class="model-header">
+          <div><h2 id="model-title">Select model</h2><p data-model-summary></p></div>
+          <button type="button" class="icon-button" data-close-models aria-label="Close model selection">×</button>
+        </header>
+        <div class="model-search-wrap"><input type="search" data-model-search placeholder="Search models or providers" autocomplete="off" aria-label="Search models"></div>
+        <div class="model-content" data-model-content></div>
+      </section>
+    </div>
     <div data-notification-settings></div>
     <div class="composer-wrap">
       <button type="button" class="scroll-latest" data-scroll-latest hidden>Scroll to bottom <span aria-hidden="true">↓</span></button>
@@ -1119,6 +1209,7 @@ function renderConversationShell() {
             <div class="mode-picker">
               <label><span>Mode</span><select data-agent-select aria-label="OpenCode mode"><option value="">Loading modes…</option></select></label>
               <button type="button" class="mode-cycle" data-cycle-agent hidden aria-label="Switch to next mode" title="Switch to next mode">↻</button>
+              <button type="button" class="model-picker-button" data-open-models aria-label="Select model" title="Select model">Model</button>
             </div>
             <div class="composer-tools">
               <input type="file" data-image-input accept="image/gif,image/jpeg,image/png,image/webp" multiple hidden>
@@ -1172,6 +1263,88 @@ function updateAgentSelector() {
     cycle.setAttribute("aria-label", `Switch to ${next.name} mode`)
     cycle.title = `Switch to ${next.name}`
   }
+  updateModelControl()
+}
+
+function selectedAgent() {
+  return state.selectedAgents.get(conversationKey()) || ""
+}
+
+function currentModel() {
+  const agent = selectedAgent()
+  if (!agent) return null
+  const selected = state.selectedModels.get(modelSelectionKey(state.routeInstanceId, state.routeSessionId, agent))
+  if (selected?.providerID && selected?.modelID) {
+    return { providerID: selected.providerID, modelID: selected.modelID, ...(selected.variant ? { variant: selected.variant } : {}) }
+  }
+  return state.agents.find((item) => item.name === agent)?.model || null
+}
+
+function catalogModel(ref = currentModel()) {
+  if (!ref) return null
+  return state.models.find((model) => model.providerID === ref.providerID && model.modelID === ref.modelID) || null
+}
+
+function updateModelControl() {
+  const button = app.querySelector("[data-open-models]")
+  if (!button) return
+  const ref = currentModel()
+  const model = catalogModel(ref)
+  button.textContent = model?.name || ref?.modelID || "Model"
+  button.title = ref ? `${model?.name || ref.modelID} · ${model?.providerName || ref.providerID}${ref.variant ? ` · ${ref.variant}` : ""}` : "Select model"
+  button.disabled = !selectedAgent() || state.modelSessionId !== conversationKey() || state.models.length === 0
+  button.classList.toggle("incompatible", model?.supportsImages === false)
+}
+
+function setModelPickerOpen(open) {
+  state.modelPickerOpen = open
+  if (open) state.modelQuery = ""
+  document.body.classList.toggle("model-open", open)
+  updateModelSheet()
+}
+
+function updateModelSheet() {
+  const overlay = app.querySelector("[data-model-overlay]")
+  const content = app.querySelector("[data-model-content]")
+  const search = app.querySelector("[data-model-search]")
+  if (!overlay || !content || !search) return
+  overlay.hidden = !state.modelPickerOpen
+  if (!state.modelPickerOpen) return
+  if (search.value !== state.modelQuery) search.value = state.modelQuery
+  const needle = state.modelQuery.trim().toLowerCase()
+  const attachments = state.messageAttachments.get(conversationKey()) || []
+  const selected = currentModel()
+  const models = state.models.filter((model) => !needle || `${model.name} ${model.modelID} ${model.providerName} ${model.providerID}`.toLowerCase().includes(needle))
+  app.querySelector("[data-model-summary]").textContent = `${titleCase(selectedAgent())} mode · ${state.models.length} available`
+  content.innerHTML = models.length ? models.map((model) => {
+    const active = selected?.providerID === model.providerID && selected?.modelID === model.modelID
+    const incompatible = attachments.length > 0 && !supportsImages(model)
+    return `<button type="button" class="model-choice${active ? " current" : ""}" data-model-provider="${esc(model.providerID)}" data-model-id="${esc(model.modelID)}" ${incompatible ? "disabled" : ""}>
+      <span><strong>${esc(model.name)}</strong><small>${esc(model.providerName)} · ${esc(model.modelID)}</small></span>
+      <em>${incompatible ? "No image input" : active ? "Selected" : ""}</em>
+    </button>`
+  }).join("") : `<div class="models-empty">No matching models.</div>`
+}
+
+function selectModel(providerID, modelID) {
+  const agent = selectedAgent()
+  const model = state.models.find((item) => item.providerID === providerID && item.modelID === modelID)
+  if (!agent || !model) return
+  const current = currentModel()
+  const key = modelSelectionKey(state.routeInstanceId, state.routeSessionId, agent)
+  const observed = state.observedModels.get(key)
+  state.selectedModels.set(key, {
+    providerID,
+    modelID,
+    ...(current?.providerID === providerID && current?.modelID === modelID && current.variant ? { variant: current.variant } : {}),
+    observedMessageId: observed?.messageId,
+    observedCreated: observed?.created,
+    local: true,
+  })
+  persistModelSelections()
+  setModelPickerOpen(false)
+  updateModelControl()
+  updateAttachmentView()
 }
 
 async function switchAgent(agent) {
@@ -1183,6 +1356,7 @@ async function switchAgent(agent) {
   state.selectedAgents.set(key, agent)
   state.switchingAgentSession = key
   updateAgentSelector()
+  updateModelSheet()
   try {
     await api(sessionApiPath(iid, sid, "agent"), {
       method: "POST",
@@ -2021,6 +2195,11 @@ app.addEventListener("toggle", (event) => {
 }, true)
 
 app.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.modelPickerOpen) {
+    event.preventDefault()
+    setModelPickerOpen(false)
+    return
+  }
   if (state.stopConfirmation && event.key === "Escape") {
     event.preventDefault()
     setStopConfirmation(null, true)
@@ -2109,6 +2288,13 @@ app.addEventListener("change", (event) => {
   restoreComposerFocus(true)
 })
 
+app.addEventListener("input", (event) => {
+  const search = event.target.closest("[data-model-search]")
+  if (!search) return
+  state.modelQuery = search.value
+  updateModelSheet()
+})
+
 app.addEventListener("click", async (event) => {
   if (state.conversationActionsOpen && !event.target.closest("[data-conversation-actions]")) setConversationActionsOpen(false)
   const target = event.target.closest("button")
@@ -2167,7 +2353,24 @@ app.addEventListener("click", async (event) => {
     return
   }
   if (target.hasAttribute("data-attach-image")) {
+    if (!supportsImages(catalogModel())) {
+      showToast("This model does not support image attachments.")
+      return
+    }
     app.querySelector("[data-image-input]")?.click()
+    return
+  }
+  if (target.hasAttribute("data-open-models")) {
+    setModelPickerOpen(true)
+    requestAnimationFrame(() => app.querySelector("[data-model-search]")?.focus())
+    return
+  }
+  if (target.hasAttribute("data-close-models")) {
+    setModelPickerOpen(false)
+    return
+  }
+  if (target.dataset.modelProvider && target.dataset.modelId) {
+    selectModel(target.dataset.modelProvider, target.dataset.modelId)
     return
   }
   if (target.dataset.removeAttachment) {
@@ -2346,11 +2549,14 @@ app.addEventListener("submit", async (event) => {
   const attachments = [...(state.messageAttachments.get(key) || [])]
   if (!text && attachments.length === 0) return
   const agent = state.selectedAgents.get(key) || ""
+  const model = currentModel()
+  if (!model?.providerID || !model?.modelID) return showToast("Select a model before sending.")
+  if (attachments.length > 0 && !supportsImages(catalogModel(model))) return showToast("This model does not support image attachments.")
   state.sendingMessages.add(key)
   updateAttachmentView()
   try {
     const images = attachments.map(({ mime, filename, url }) => ({ mime, filename, url }))
-    await api(sessionApiPath(iid, sid, "messages"), { method: "POST", body: JSON.stringify({ text, agent, images }) })
+    await api(sessionApiPath(iid, sid, "messages"), { method: "POST", body: JSON.stringify({ text, agent, images, model }) })
     state.messageDrafts.delete(key)
     const sentIds = new Set(attachments.map((attachment) => attachment.id))
     const remaining = (state.messageAttachments.get(key) || []).filter((attachment) => !sentIds.has(attachment.id))
@@ -2374,7 +2580,8 @@ app.addEventListener("submit", async (event) => {
 window.addEventListener("hashchange", () => {
   stopDictation(true)
   setStopConfirmation(null)
-  document.body.classList.remove("changes-open", "sessions-open", "agent-drawer-open")
+  document.body.classList.remove("changes-open", "sessions-open", "agent-drawer-open", "model-open")
+  state.modelPickerOpen = false
   clearTimeout(state.refreshTimer)
   clearTimeout(state.changesTimer)
   clearTimeout(state.scrollToLatestTimer)
@@ -2394,6 +2601,9 @@ window.addEventListener("hashchange", () => {
   state.loadingMessages = false
   state.agents = []
   state.agentSessionId = ""
+  state.models = []
+  state.modelSessionId = ""
+  state.loadingModelsSession = ""
   state.changes = []
   state.changesSessionId = ""
   state.loadingChangesSession = ""
@@ -2466,6 +2676,9 @@ source.addEventListener("state", (event) => {
 })
 source.addEventListener("agent-event", (message) => {
   const event = JSON.parse(message.data)
+  if (event.type === "message.updated" && event.instanceId && event.sessionId) {
+    observeMessageModel(event.instanceId, event.sessionId, event.message?.info)
+  }
   if ((event.type === "question.replied" || event.type === "question.rejected") && event.requestId) {
     state.questionAnswers.delete(scopedKey(event.instanceId, event.requestId))
     persistDrafts()

@@ -4,6 +4,7 @@ import {
   MAX_IMAGE_BYTES,
   MAX_IMAGE_COUNT,
   MAX_MESSAGE_TEXT_BYTES,
+  validateImageModelSupport,
   validateMessageInput,
 } from "../src/message-input.mjs"
 
@@ -20,6 +21,7 @@ test("message input accepts text, images, or both", () => {
     text: "Continue",
     agent: "build",
     images: [],
+    model: null,
   })
 
   const attachment = image()
@@ -27,8 +29,32 @@ test("message input accepts text, images, or both", () => {
     text: "",
     agent: "",
     images: [attachment],
+    model: null,
   })
   assert.deepEqual(validateMessageInput({ text: "Inspect this", images: [attachment] }).images, [attachment])
+})
+
+test("message input validates optional model selections", () => {
+  assert.deepEqual(validateMessageInput({
+    text: "Continue",
+    model: { providerID: " opencode-go ", modelID: " kimi-k3 ", variant: " max " },
+  }).model, { providerID: "opencode-go", modelID: "kimi-k3", variant: "max" })
+  assert.deepEqual(validateMessageInput({
+    text: "Continue",
+    model: { providerID: "openai", modelID: "gpt-5.6-sol", variant: "default" },
+  }).model, { providerID: "openai", modelID: "gpt-5.6-sol" })
+  assert.throws(() => validateMessageInput({ text: "Continue", model: {} }), /providerID and modelID/)
+  assert.throws(() => validateMessageInput({ text: "Continue", model: "openai/gpt" }), /Model must be an object/)
+})
+
+test("image prompts reject explicitly unsupported models", () => {
+  const input = validateMessageInput({
+    text: "Review this",
+    images: [image()],
+    model: { providerID: "ollama", modelID: "text-only" },
+  })
+  assert.throws(() => validateImageModelSupport(input, [{ providerID: "ollama", modelID: "text-only", supportsImages: false }]), /does not support image attachments/)
+  assert.doesNotThrow(() => validateImageModelSupport(input, [{ providerID: "ollama", modelID: "text-only", supportsImages: true }]))
 })
 
 test("message input rejects empty and malformed payloads", () => {

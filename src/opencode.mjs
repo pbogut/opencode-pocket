@@ -404,8 +404,37 @@ export class OpenCodeBridge extends EventEmitter {
         description: agent.description || "",
         mode: agent.mode,
         color: agent.color || "",
+        model: agent.model?.providerID && agent.model?.modelID
+          ? {
+              providerID: agent.model.providerID,
+              modelID: agent.model.modelID,
+              ...(agent.variant && agent.variant !== "default" ? { variant: agent.variant } : {}),
+            }
+          : null,
       }))
       .filter((agent) => agent.name)
+  }
+
+  async listModels(sid) {
+    const data = await this.request(this.pathForSession("/provider", sid))
+    const connected = new Set(Array.isArray(data?.connected) ? data.connected : [])
+    const result = []
+    for (const provider of Array.isArray(data?.all) ? data.all : []) {
+      if (!provider?.id || !connected.has(provider.id)) continue
+      for (const model of Object.values(provider.models || {})) {
+        if (!model?.id || model.status === "deprecated") continue
+        result.push({
+          providerID: provider.id,
+          providerName: provider.name || provider.id,
+          modelID: model.id,
+          name: model.name || model.id,
+          status: model.status || "active",
+          supportsImages: model.capabilities?.input?.image === true,
+          variants: Object.keys(model.variants || {}),
+        })
+      }
+    }
+    return result.sort((a, b) => a.providerName.localeCompare(b.providerName) || a.name.localeCompare(b.name))
   }
 
   async describe() {
@@ -432,12 +461,17 @@ export class OpenCodeBridge extends EventEmitter {
     return session
   }
 
-  async sendMessage(sid, text, agent = "", images = []) {
+  async sendMessage(sid, text, agent = "", images = [], model = null) {
     const parts = [
       ...(text ? [{ type: "text", text }] : []),
       ...images.map(({ mime, filename, url }) => ({ type: "file", mime, filename, url })),
     ]
-    const body = { parts, ...(agent ? { agent } : {}) }
+    const body = {
+      parts,
+      ...(agent ? { agent } : {}),
+      ...(model ? { model: { providerID: model.providerID, modelID: model.modelID } } : {}),
+      ...(model?.variant ? { variant: model.variant } : {}),
+    }
     return this.request(this.pathForSession(`/session/${encodeURIComponent(sid)}/prompt_async`, sid), {
       method: "POST",
       body: JSON.stringify(body),
