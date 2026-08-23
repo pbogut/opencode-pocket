@@ -1,8 +1,10 @@
 import { completionId, completionTag, isVisibleSession } from "./notification-state.js"
+import { normalizeAgentSort, sortAgentItems } from "./agent-sort.js"
 
 const app = document.querySelector("#app")
 
 const DRAFTS_KEY = "opencode-pocket-drafts-v1"
+const AGENT_SORT_KEY = "opencode-pocket-agent-sort-v1"
 const BOTTOM_THRESHOLD = 80
 const DEFAULT_NOTIFICATION_PREFERENCES = { blockers: true, completed: true }
 const IMAGE_MIME_TYPES = new Set(["image/gif", "image/jpeg", "image/png", "image/webp"])
@@ -73,6 +75,7 @@ const state = {
   notificationPreferences: { ...DEFAULT_NOTIFICATION_PREFERENCES },
   ntfySettings: { available: false, enabled: false, preferences: { ...DEFAULT_NOTIFICATION_PREFERENCES } },
   notificationBusy: false,
+  agentSort: loadAgentSort(),
 }
 
 function draftEntries(value) {
@@ -97,6 +100,18 @@ function persistDrafts() {
   } catch {
     // In-memory drafts still protect input during this page session.
   }
+}
+
+function loadAgentSort() {
+  try {
+    return normalizeAgentSort(localStorage.getItem(AGENT_SORT_KEY))
+  } catch {
+    return "path"
+  }
+}
+
+function persistAgentSort() {
+  try { localStorage.setItem(AGENT_SORT_KEY, state.agentSort) } catch {}
 }
 
 function decodeRoutePart(value) {
@@ -720,6 +735,16 @@ function projectLabel(instance) {
   return project?.name || project?.worktree || project?.id || instance?.path?.directory || instance?.path?.worktree || ""
 }
 
+function agentPath(instance) {
+  const project = instance?.project
+  return instance?.path?.directory
+    || instance?.path?.worktree
+    || (typeof project === "string" ? project : project?.worktree)
+    || projectLabel(instance)
+    || instance?.id
+    || ""
+}
+
 function instanceTitle(instance) {
   return instance?.serviceName || projectLabel(instance) || instance?.source || instance?.id || "Instance"
 }
@@ -765,10 +790,34 @@ function renderAgentSummary(instances) {
   return `<button type="button" class="agent-summary" data-open-agents aria-label="Open agents. ${esc(summaryLabel)}">${countsHtml}</button>${alert}`
 }
 
+function renderAgentSort() {
+  const options = [
+    ["path", "Path"],
+    ["recent", "Recency"],
+    ["status", "Status"],
+  ].map(([value, label]) => `<option value="${value}" ${state.agentSort === value ? "selected" : ""}>${label}</option>`).join("")
+  return `<label class="agent-sort"><span>Sort by</span><select data-agent-sort aria-label="Sort agents">${options}</select></label>`
+}
+
+function sortedAgentItems(instances) {
+  return sortAgentItems(instances.map((instance) => {
+    const { session, status } = agentStatus(instance)
+    return {
+      instance,
+      session,
+      id: instance.id,
+      path: agentPath(instance),
+      updated: session?.time?.updated || session?.time?.created || 0,
+      status: status.className,
+      statusDetails: status,
+    }
+  }), state.agentSort)
+}
+
 function renderAgentList(instances) {
   if (!instances.length) return `<div class="empty">No OpenCode agents found.</div>`
-  return `<div class="agent-list">${instances.map((instance) => {
-    const { session, status } = agentStatus(instance)
+  return `${renderAgentSort()}<div class="agent-list">${sortedAgentItems(instances).map((item) => {
+    const { instance, session, statusDetails: status } = item
     const details = projectLabel(instance) || instance.serviceName || instanceTitle(instance)
     const openable = session && instance.connected
     return `<button class="agent-card" ${openable ? `data-open-session="${esc(session.id)}" data-instance-id="${esc(instance.id)}"` : "disabled"}>
@@ -2044,6 +2093,14 @@ app.addEventListener("change", (event) => {
   const ntfyPreference = event.target.closest("[data-ntfy-notification-preference]")
   if (ntfyPreference) {
     saveNtfySettings({ preferences: { [ntfyPreference.dataset.ntfyNotificationPreference]: ntfyPreference.checked } })
+    return
+  }
+  const agentSort = event.target.closest("[data-agent-sort]")
+  if (agentSort) {
+    state.agentSort = normalizeAgentSort(agentSort.value)
+    persistAgentSort()
+    state.renderedAgentNavigation = ""
+    render()
     return
   }
   const select = event.target.closest("[data-agent-select]")
