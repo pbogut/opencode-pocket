@@ -1596,6 +1596,42 @@ function revealComposer(textarea) {
   textarea.scrollIntoView({ block: "nearest" })
 }
 
+let composerRevealFrame = 0
+let composerRevealTimer = 0
+let composerRevealDeadline = 0
+
+function scheduleComposerReveal(textarea) {
+  state.followMessages = true
+  const reveal = () => {
+    if (document.activeElement === textarea && textarea.isConnected) revealComposer(textarea)
+  }
+  cancelAnimationFrame(composerRevealFrame)
+  clearTimeout(composerRevealTimer)
+  composerRevealFrame = requestAnimationFrame(reveal)
+  composerRevealTimer = setTimeout(reveal, 350)
+}
+
+function cancelComposerReveal() {
+  composerRevealDeadline = 0
+  cancelAnimationFrame(composerRevealFrame)
+  clearTimeout(composerRevealTimer)
+}
+
+function beginComposerReveal(textarea, shouldReveal = isNearBottom()) {
+  if (!shouldReveal) {
+    cancelComposerReveal()
+    return
+  }
+  composerRevealDeadline = Date.now() + 1_500
+  scheduleComposerReveal(textarea)
+}
+
+function revealComposerAfterViewportResize() {
+  if (Date.now() > composerRevealDeadline) return
+  const textarea = app.querySelector("[data-composer] textarea")
+  if (document.activeElement === textarea) scheduleComposerReveal(textarea)
+}
+
 function restoreComposerFocus(reveal = false) {
   const selection = state.composerSelection
   state.composerSelection = null
@@ -1607,13 +1643,7 @@ function restoreComposerFocus(reveal = false) {
   resizeComposerTextarea(textarea)
   try { navigator.virtualKeyboard?.show() } catch {}
   if (!reveal) return
-  state.followMessages = true
-  const revealAfterKeyboard = () => {
-    if (document.activeElement !== textarea || !textarea.isConnected) return
-    revealComposer(textarea)
-  }
-  requestAnimationFrame(revealAfterKeyboard)
-  setTimeout(revealAfterKeyboard, 350)
+  beginComposerReveal(textarea)
 }
 
 let speechDictation = null
@@ -1719,10 +1749,7 @@ function startDictation() {
   }
   textarea.focus({ preventScroll: true })
   textarea.setSelectionRange(end, end)
-  revealComposer(textarea)
-  setTimeout(() => {
-    if (speechDictation === current && document.activeElement === textarea) revealComposer(textarea)
-  }, 350)
+  beginComposerReveal(textarea)
   updateDictationButton()
   try {
     recognition.start()
@@ -1862,10 +1889,19 @@ async function createAndOpenSession() {
 }
 
 app.addEventListener("pointerdown", (event) => {
+  const textarea = event.target.closest("[data-composer] textarea")
+  if (textarea) beginComposerReveal(textarea)
   const control = event.target.closest("[data-agent-select], [data-cycle-agent]")
   if (!control) return
   const hadComposerFocus = captureComposerSelection()
   if (hadComposerFocus && control.hasAttribute("data-cycle-agent")) event.preventDefault()
+})
+
+app.addEventListener("focusin", (event) => {
+  const textarea = event.target.closest("[data-composer] textarea")
+  if (!textarea) return
+  if (Date.now() <= composerRevealDeadline) scheduleComposerReveal(textarea)
+  else beginComposerReveal(textarea)
 })
 
 app.addEventListener("input", (event) => {
@@ -2314,6 +2350,9 @@ window.addEventListener("scroll", () => {
   state.followMessages = isNearBottom()
   updateScrollToLatestButton()
 }, { passive: true })
+
+window.visualViewport?.addEventListener("resize", revealComposerAfterViewportResize)
+window.addEventListener("resize", revealComposerAfterViewportResize)
 
 let devServerId = ""
 const source = new EventSource("/api/events")
