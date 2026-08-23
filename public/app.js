@@ -31,6 +31,7 @@ const state = {
   loadingChangesSession: "",
   changesOpen: false,
   sessionsOpen: false,
+  conversationActionsOpen: false,
   agentDrawerOpen: false,
   creatingSession: false,
   switchingSessionId: "",
@@ -745,7 +746,7 @@ function renderAgentSummary(instances) {
   const alert = nextBlocked
     ? `<button type="button" class="agent-alert blocked" data-open-session="${esc(nextBlocked.session.id)}" data-instance-id="${esc(nextBlocked.instance.id)}" aria-label="Open next blocked agent: ${esc(titleFor(nextBlocked.session))}" title="Open next blocked agent"><i aria-hidden="true"></i><strong>${counts.blocked} blocked</strong></button>`
     : ""
-  return `<button type="button" class="agent-summary" data-open-agents aria-label="Open agents. ${esc(summaryLabel)}"><span class="agent-summary-label">Agents</span>${countsHtml}</button>${alert}`
+  return `<button type="button" class="agent-summary" data-open-agents aria-label="Open agents. ${esc(summaryLabel)}">${countsHtml}</button>${alert}`
 }
 
 function renderAgentList(instances) {
@@ -975,14 +976,17 @@ function renderConversationShell() {
     <header class="topbar conversation-topbar">
       <div class="topbar-row">
         <button class="icon-button agent-drawer-button" data-open-agents aria-label="Open agents" title="Open agents">☰</button>
-        <div style="min-width:0;flex:1">
-          <h1 data-session-title style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></h1>
-          <div class="connection"><span class="badge idle" data-session-status>idle</span></div>
+        <h1 class="session-title" data-session-title></h1>
+        <div class="agent-radar" data-agent-radar></div>
+        <div class="conversation-actions" data-conversation-actions>
+          <button class="icon-button conversation-actions-button" data-toggle-conversation-actions aria-label="Conversation actions" aria-haspopup="menu" aria-expanded="false" title="Conversation actions"><span aria-hidden="true">⋮</span></button>
+          <div class="conversation-actions-menu" data-conversation-actions-menu role="menu" hidden>
+            <button type="button" class="conversation-action" data-open-sessions role="menuitem"><span>Sessions</span><small>Switch or create</small></button>
+            <button type="button" class="conversation-action" data-open-changes role="menuitem" disabled><span>Git changes</span><small data-changes-menu-summary>No changes</small></button>
+          </div>
         </div>
-        <button class="icon-button changes-button" data-open-changes hidden aria-label="Open session changes" title="Session changes"><span aria-hidden="true">±</span><small data-changes-count></small></button>
-        <button class="icon-button sessions-button" data-open-sessions aria-label="Switch session" title="Switch session"><span aria-hidden="true">☷</span></button>
       </div>
-      <div class="agent-radar" data-agent-radar></div>
+      <span class="badge session-status-sticky idle" data-session-status>idle</span>
     </header>
     <div class="meta" data-session-meta></div>
     <div data-messages></div>
@@ -1164,6 +1168,7 @@ function updateAttention(force = false) {
 }
 
 function setChangesOpen(open) {
+  if (open && state.conversationActionsOpen) setConversationActionsOpen(false)
   if (open && state.sessionsOpen) setSessionsOpen(false)
   if (open && state.agentDrawerOpen) setAgentDrawerOpen(false)
   state.changesOpen = open
@@ -1174,6 +1179,7 @@ function setChangesOpen(open) {
 }
 
 function setAgentDrawerOpen(open) {
+  if (open && state.conversationActionsOpen) setConversationActionsOpen(false)
   if (open && state.changesOpen) setChangesOpen(false)
   if (open && state.sessionsOpen) setSessionsOpen(false)
   state.agentDrawerOpen = open
@@ -1223,7 +1229,19 @@ function renderSessionDrawer() {
   return `<button type="button" class="button primary new-session-button" data-new-session ${state.creatingSession || Boolean(state.switchingSessionId) ? "disabled" : ""}>${newLabel}</button>${choices}`
 }
 
+function setConversationActionsOpen(open, restoreFocus = false) {
+  state.conversationActionsOpen = open
+  const trigger = app.querySelector("[data-toggle-conversation-actions]")
+  const menu = app.querySelector("[data-conversation-actions-menu]")
+  if (!trigger || !menu) return
+  trigger.setAttribute("aria-expanded", String(open))
+  menu.hidden = !open
+  if (open) requestAnimationFrame(() => menu.querySelector("[role=menuitem]:not(:disabled)")?.focus())
+  else if (restoreFocus) trigger.focus()
+}
+
 function setSessionsOpen(open) {
+  if (open && state.conversationActionsOpen) setConversationActionsOpen(false)
   if (open && state.changesOpen) setChangesOpen(false)
   if (open && state.agentDrawerOpen) setAgentDrawerOpen(false)
   state.sessionsOpen = open
@@ -1252,8 +1270,13 @@ function updateChangesView() {
   const sessionKey = conversationKey()
   const changes = state.changesSessionId === sessionKey ? state.changes : []
   const uniqueFiles = new Set(changes.flatMap((change) => change.files || []))
-  button.hidden = changes.length === 0 && state.loadingChangesSession !== sessionKey
-  button.querySelector("[data-changes-count]").textContent = changes.length || ""
+  const loading = state.loadingChangesSession === sessionKey
+  button.disabled = changes.length === 0
+  button.querySelector("[data-changes-menu-summary]").textContent = loading
+    ? "Loading…"
+    : changes.length
+      ? `${changes.length} ${changes.length === 1 ? "turn" : "turns"} · ${uniqueFiles.size} ${uniqueFiles.size === 1 ? "file" : "files"}`
+      : "No changes"
   button.setAttribute("aria-label", `Open ${changes.length} session change ${changes.length === 1 ? "turn" : "turns"}`)
   overlay.hidden = !state.changesOpen
   overlay.querySelector("[data-changes-summary]").textContent = `${changes.length} ${changes.length === 1 ? "turn" : "turns"} · ${uniqueFiles.size} ${uniqueFiles.size === 1 ? "file" : "files"}`
@@ -1312,7 +1335,7 @@ function updateConversation(session) {
   app.querySelector("[data-session-meta]").innerHTML = `<span class="meta-detail">${esc(meta)}</span>${syncLabel ? `<span class="tui-sync-status">${syncLabel}</span>` : ""}`
   const badge = app.querySelector("[data-session-status]")
   badge.textContent = status.label
-  badge.className = `badge ${status.className}`
+  badge.className = `badge session-status-sticky ${status.className}`
   const stop = app.querySelector("[data-stop]")
   const activity = session.status?.type
   const active = status.className !== "attention" && (activity === "busy" || activity === "retry")
@@ -1918,6 +1941,20 @@ app.addEventListener("keydown", (event) => {
     render()
     return
   }
+  if (state.conversationActionsOpen && event.key === "Escape") {
+    event.preventDefault()
+    setConversationActionsOpen(false, true)
+    return
+  }
+  if (state.conversationActionsOpen && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+    const items = [...app.querySelectorAll("[data-conversation-actions-menu] [role=menuitem]:not(:disabled)")]
+    if (!items.length) return
+    event.preventDefault()
+    const current = items.indexOf(document.activeElement)
+    const offset = event.key === "ArrowDown" ? 1 : -1
+    items[(current + offset + items.length) % items.length].focus()
+    return
+  }
   if (event.key === "Escape" && state.changesOpen) {
     event.preventDefault()
     setChangesOpen(false)
@@ -1964,8 +2001,14 @@ app.addEventListener("change", (event) => {
 })
 
 app.addEventListener("click", async (event) => {
+  if (state.conversationActionsOpen && !event.target.closest("[data-conversation-actions]")) setConversationActionsOpen(false)
   const target = event.target.closest("button")
   if (!target) return
+
+  if (target.hasAttribute("data-toggle-conversation-actions")) {
+    setConversationActionsOpen(!state.conversationActionsOpen)
+    return
+  }
 
   if (target.dataset.openSession) {
     const instanceId = target.dataset.instanceId
@@ -2245,6 +2288,7 @@ window.addEventListener("hashchange", () => {
   state.loadingChangesSession = ""
   state.changesOpen = false
   state.sessionsOpen = false
+  state.conversationActionsOpen = false
   state.agentDrawerOpen = false
   state.diffs.clear()
   state.diffErrors.clear()
