@@ -13,6 +13,7 @@ Current features:
 - creates and switches sessions, with optional OpenCode TUI synchronization
 - cycles directly through active sessions blocked on questions or permissions
 - selects OpenCode modes and models, including image-capability checks
+- shows current context usage and cumulative session cost in the conversation actions menu
 - accepts browser voice dictation when supported
 - preserves drafts per instance and session
 - installs as a PWA and delivers background Web Push or ntfy blocker and completion notifications
@@ -181,6 +182,7 @@ From a conversation:
 - open the session drawer to switch among the 10 newest root sessions or create a session
 - select an OpenCode mode in the composer; the selection is used for subsequent prompts
 - open the model picker to search connected providers and select a model for the current session and mode
+- open conversation actions to see the latest completed response's context usage and the session's cumulative cost
 - attach images from the picker or paste screenshots into the composer; remove unwanted previews before sending
 - open the changes view to inspect changed turns and load file diffs on demand
 - tap the microphone button for live dictation when the browser supports the Web Speech API
@@ -314,7 +316,7 @@ Important request and response details:
 - `POST .../sessions` accepts optional `{ "directory": "..." }`, selects the created session in OpenCode, and returns `201`
 - `GET .../messages?limit=N` defaults to 100 messages and caps the limit at 300
 - `POST .../messages` accepts optional text and images as `{ "text": "...", "agent": "optional-mode", "model": { "providerID": "openai", "modelID": "gpt-5.6-sol", "variant": "optional" }, "images": [{ "mime": "image/png", "filename": "screen.png", "url": "data:image/png;base64,..." }] }` and returns `202`; at least text or one image is required
-- `GET .../models` returns sanitized metadata for connected, non-deprecated models; provider credentials and model options are never exposed
+- `GET .../models` returns sanitized metadata, including context limits, for connected, non-deprecated models; provider credentials, pricing, and model options are never exposed
 - `GET .../diff` requires the `messageId` query parameter
 - `POST .../agent` requires `{ "agent": "mode-name" }`
 - question replies require `{ "answers": [...] }`

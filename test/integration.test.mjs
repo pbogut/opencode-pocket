@@ -63,6 +63,8 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
                 status: "active",
                 capabilities: { input: { image: true } },
                 variants: { high: {} },
+                limit: { context: 272000, output: 32000 },
+                cost: { input: 1.25, output: 10 },
                 options: { apiKey: "must-not-leak" },
               },
             },
@@ -172,6 +174,7 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
     status: "active",
     supportsImages: true,
     variants: ["high"],
+    contextLimit: 272000,
   }])
   await bridge.switchAgent("ses_1", "review")
   const agentCall = calls.find((call) => call.path === "/api/session/ses_1/agent")

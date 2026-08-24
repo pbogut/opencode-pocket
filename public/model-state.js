@@ -54,3 +54,33 @@ export function isStaleObservation(observed, previous) {
 export function supportsImages(model) {
   return model?.supportsImages !== false
 }
+
+function finiteNumber(value) {
+  const number = Number(value)
+  return Number.isFinite(number) ? Math.max(0, number) : 0
+}
+
+export function conversationUsage(messages, models, sessionCost = 0) {
+  const cost = finiteNumber(sessionCost)
+  const last = (messages || []).findLast((message) => {
+    const info = message?.info || message
+    return info?.role === "assistant" && finiteNumber(info.tokens?.output) > 0
+  })
+  if (!last) return { tokens: 0, percent: null, cost }
+
+  const info = last.info || last
+  const tokens = [
+    info.tokens?.input,
+    info.tokens?.output,
+    info.tokens?.reasoning,
+    info.tokens?.cache?.read,
+    info.tokens?.cache?.write,
+  ].reduce((total, value) => total + finiteNumber(value), 0)
+  const model = (models || []).find((item) => item.providerID === info.providerID && item.modelID === info.modelID)
+  const contextLimit = finiteNumber(model?.contextLimit)
+  return {
+    tokens,
+    percent: contextLimit > 0 ? Math.round((tokens / contextLimit) * 100) : null,
+    cost,
+  }
+}

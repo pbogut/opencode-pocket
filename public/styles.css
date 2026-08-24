@@ -36,8 +36,13 @@ button { color: inherit; }
 @keyframes refresh-spin { to { transform: rotate(360deg); } }
 .conversation-actions { position: relative; flex: none; }
 .conversation-actions-button { min-width: 36px; height: 36px; border-radius: 10px; padding: 7px 9px; font-size: 20px; line-height: 1; }
-.conversation-actions-menu { position: absolute; z-index: 20; top: calc(100% + 7px); right: 0; width: 190px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 5px; box-shadow: 0 14px 35px rgb(0 0 0 / .45); }
+.conversation-actions-menu { position: absolute; z-index: 20; top: calc(100% + 7px); right: 0; width: 220px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 5px; box-shadow: 0 14px 35px rgb(0 0 0 / .45); }
 .conversation-actions-menu[hidden] { display: none; }
+.conversation-usage { display: grid; gap: 6px; margin: 2px 4px 5px; border-bottom: 1px solid var(--line); padding: 7px 6px 10px; }
+.conversation-usage span { min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.conversation-usage strong, .conversation-usage small { display: block; min-width: 0; }
+.conversation-usage strong { font-size: 11px; }
+.conversation-usage small { margin-top: 3px; overflow: hidden; color: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-action { width: 100%; display: block; border: 0; border-radius: 8px; background: transparent; padding: 9px 10px; text-align: left; cursor: pointer; }
 .conversation-action:hover, .conversation-action:focus-visible { background: #252b38; outline: none; }
 .conversation-action span, .conversation-action small { display: block; }

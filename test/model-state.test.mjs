@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { isStaleObservation, isSyntheticUserMessage, latestModels, reconcileSelection, supportsImages, visibleMessageParts } from "../public/model-state.js"
+import { conversationUsage, isStaleObservation, isSyntheticUserMessage, latestModels, reconcileSelection, supportsImages, visibleMessageParts } from "../public/model-state.js"
 
 test("latest models are tracked independently per mode", () => {
   const models = latestModels([
@@ -81,4 +81,22 @@ test("image support only rejects explicit unsupported models", () => {
   assert.equal(supportsImages({ supportsImages: true }), true)
   assert.equal(supportsImages({ supportsImages: false }), false)
   assert.equal(supportsImages(null), true)
+})
+
+test("conversation usage matches the latest completed OpenCode assistant response", () => {
+  const messages = [
+    { info: { role: "assistant", providerID: "openai", modelID: "old", tokens: { input: 10, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } } },
+    { info: { role: "assistant", providerID: "openai", modelID: "gpt", tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 10 } } } },
+    { info: { role: "assistant", providerID: "openai", modelID: "gpt", tokens: { input: 999, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } } },
+  ]
+  const models = [{ providerID: "openai", modelID: "gpt", contextLimit: 200 }]
+
+  assert.deepEqual(conversationUsage(messages, models, 1.26927), { tokens: 175, percent: 88, cost: 1.26927 })
+})
+
+test("conversation usage tolerates missing responses and model limits", () => {
+  assert.deepEqual(conversationUsage([], [], 0), { tokens: 0, percent: null, cost: 0 })
+  assert.deepEqual(conversationUsage([
+    { info: { role: "assistant", providerID: "openai", modelID: "gpt", tokens: { input: 10, output: 2 } } },
+  ], [], "invalid"), { tokens: 12, percent: null, cost: 0 })
 })

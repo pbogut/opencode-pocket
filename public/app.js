@@ -1,6 +1,6 @@
 import { completionId, completionTag, isVisibleSession } from "./notification-state.js"
 import { normalizeAgentSort, sortAgentItems } from "./agent-sort.js"
-import { isStaleObservation, latestModels, reconcileSelection, supportsImages, visibleMessageParts } from "./model-state.js"
+import { conversationUsage, isStaleObservation, latestModels, reconcileSelection, supportsImages, visibleMessageParts } from "./model-state.js"
 
 const app = document.querySelector("#app")
 
@@ -14,6 +14,7 @@ const MAX_IMAGE_COUNT = 4
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_IMAGE_TOTAL_BYTES = 10 * 1024 * 1024
 const MESSAGE_REFRESH_INTERVAL = 250
+const USD = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })
 const savedDrafts = loadDrafts()
 const savedModelSelections = loadModelSelections()
 const initialRoute = routeFromHash()
@@ -1096,6 +1097,10 @@ function renderConversationShell(empty = false) {
         <div class="conversation-actions" data-conversation-actions ${empty ? "hidden" : ""}>
           <button class="icon-button conversation-actions-button" data-toggle-conversation-actions aria-label="Conversation actions" aria-haspopup="menu" aria-expanded="false" title="Conversation actions"><span aria-hidden="true">⋮</span></button>
           <div class="conversation-actions-menu" data-conversation-actions-menu role="menu" hidden>
+            <div class="conversation-usage" aria-label="Conversation usage">
+              <span><strong>Context</strong><small data-context-usage>0 tokens</small></span>
+              <span><strong>Cost</strong><small data-cost-usage>$0.00 spent</small></span>
+            </div>
             <button type="button" class="conversation-action" data-open-sessions role="menuitem"><span>Sessions</span><small>Switch or create</small></button>
             <button type="button" class="conversation-action" data-open-changes role="menuitem" disabled><span>Git changes</span><small data-changes-menu-summary>No changes</small></button>
           </div>
@@ -1454,6 +1459,15 @@ function setConversationActionsOpen(open, restoreFocus = false) {
   else if (restoreFocus) trigger.focus()
 }
 
+function updateConversationUsage(session) {
+  const context = app.querySelector("[data-context-usage]")
+  const cost = app.querySelector("[data-cost-usage]")
+  if (!context || !cost) return
+  const usage = conversationUsage(state.messages, state.models, session?.cost)
+  context.textContent = `${usage.tokens.toLocaleString()} tokens${usage.percent === null ? "" : ` · ${usage.percent}% used`}`
+  cost.textContent = `${USD.format(usage.cost)} spent`
+}
+
 function setSessionsOpen(open) {
   if (open && state.conversationActionsOpen) setConversationActionsOpen(false)
   if (open && state.changesOpen) setChangesOpen(false)
@@ -1547,6 +1561,7 @@ function updateConversation(session) {
       ? "Syncing TUI"
       : tui ? "TUI connected" : ""
   app.querySelector("[data-session-meta]").innerHTML = `<span class="meta-detail">${esc(meta)}</span>${syncLabel ? `<span class="tui-sync-status">${syncLabel}</span>` : ""}`
+  updateConversationUsage(session)
   const badge = app.querySelector("[data-session-status]")
   badge.textContent = status.label
   badge.className = `badge session-status-sticky ${status.className}`

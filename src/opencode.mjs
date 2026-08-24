@@ -431,6 +431,7 @@ export class OpenCodeBridge extends EventEmitter {
           status: model.status || "active",
           supportsImages: model.capabilities?.input?.image === true,
           variants: Object.keys(model.variants || {}),
+          ...(Number.isFinite(model.limit?.context) && model.limit.context > 0 ? { contextLimit: model.limit.context } : {}),
         })
       }
     }
