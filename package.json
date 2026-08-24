@@ -18,7 +18,7 @@
     "start": "node bin/opencode-pocket.mjs",
     "dev": "node --watch bin/opencode-pocket.mjs --dev",
     "test": "node --test test/*.test.mjs packages/opencode-pocket-plugin/tui.test.js",
-    "check": "node --check bin/opencode-pocket.mjs && node --check src/config-profile.mjs && node --check src/server.mjs && node --check src/discovery.mjs && node --check src/instances.mjs && node --check src/opencode.mjs && node --check src/message-input.mjs && node --check src/plugin-token.mjs && node --check src/notifications.mjs && node --check public/app.js && node --check public/agent-sort.js && node --check public/model-state.js && node --check public/notification-state.js && node --check public/sw.js"
+    "check": "node --check bin/opencode-pocket.mjs && node --check src/config-profile.mjs && node --check src/server.mjs && node --check src/discovery.mjs && node --check src/instances.mjs && node --check src/opencode.mjs && node --check src/message-input.mjs && node --check src/plugin-token.mjs && node --check src/notifications.mjs && node --check public/app.js && node --check public/agent-sort.js && node --check public/model-state.js && node --check public/notification-state.js && node --check public/quick-message-state.js && node --check public/sw.js"
   },
   "engines": {
     "node": ">=20.12.0"

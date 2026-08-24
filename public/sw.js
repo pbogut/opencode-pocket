@@ -1,6 +1,6 @@
-const CACHE = "opencode-pocket-v41"
+const CACHE = "opencode-pocket-v43"
 const ACK_CACHE = "opencode-pocket-notification-acks-v1"
-const ASSETS = ["/", "/styles.css", "/app.js", "/agent-sort.js", "/model-state.js", "/notification-state.js", "/manifest.webmanifest", "/icon.svg"]
+const ASSETS = ["/", "/styles.css", "/app.js", "/agent-sort.js", "/model-state.js", "/notification-state.js", "/quick-message-state.js", "/manifest.webmanifest", "/icon.svg"]
 const acknowledgedCompletions = new Set()
 self.addEventListener("install", (event) => event.waitUntil(Promise.all([
   self.skipWaiting(),

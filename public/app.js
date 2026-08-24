@@ -1,12 +1,14 @@
 import { completionId, completionTag, isVisibleSession } from "./notification-state.js"
 import { normalizeAgentSort, sortAgentItems } from "./agent-sort.js"
 import { conversationUsage, isStaleObservation, latestModels, reconcileSelection, supportsImages, visibleMessageParts } from "./model-state.js"
+import { normalizeQuickMessages, quickMessageModeAvailable } from "./quick-message-state.js"
 
 const app = document.querySelector("#app")
 
 const DRAFTS_KEY = "opencode-pocket-drafts-v1"
 const AGENT_SORT_KEY = "opencode-pocket-agent-sort-v1"
 const MODEL_SELECTIONS_KEY = "opencode-pocket-model-selections-v1"
+const QUICK_MESSAGES_KEY = "opencode-pocket-quick-messages-v1"
 const BOTTOM_THRESHOLD = 80
 const DEFAULT_NOTIFICATION_PREFERENCES = { blockers: true, completed: true }
 const IMAGE_MIME_TYPES = new Set(["image/gif", "image/jpeg", "image/png", "image/webp"])
@@ -17,6 +19,7 @@ const MESSAGE_REFRESH_INTERVAL = 250
 const USD = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })
 const savedDrafts = loadDrafts()
 const savedModelSelections = loadModelSelections()
+const savedQuickMessages = loadQuickMessages()
 const initialRoute = routeFromHash()
 const notificationRoute = new URLSearchParams(location.search).get("notification") === "1"
 if (notificationRoute) history.replaceState(null, "", `${location.pathname}${location.hash}`)
@@ -70,6 +73,7 @@ const state = {
   renderedSessions: "",
   renderedAgentNavigation: "",
   renderedNotifications: "",
+  renderedQuickMessages: "",
   attentionRequest: "",
   attentionCollapsed: false,
   stopConfirmation: null,
@@ -86,6 +90,11 @@ const state = {
   notificationPreferences: { ...DEFAULT_NOTIFICATION_PREFERENCES },
   ntfySettings: { available: false, enabled: false, preferences: { ...DEFAULT_NOTIFICATION_PREFERENCES } },
   notificationBusy: false,
+  quickMessages: savedQuickMessages,
+  quickMessageEditor: null,
+  quickMessagesOpen: false,
+  quickMessagesReplaceDraft: false,
+  quickMessageSending: "",
   agentSort: loadAgentSort(),
 }
 
@@ -136,6 +145,22 @@ function loadModelSelections() {
 
 function persistModelSelections() {
   try { localStorage.setItem(MODEL_SELECTIONS_KEY, JSON.stringify(Object.fromEntries(state.selectedModels))) } catch {}
+}
+
+function loadQuickMessages() {
+  try { return normalizeQuickMessages(JSON.parse(localStorage.getItem(QUICK_MESSAGES_KEY) || "[]")) } catch { return [] }
+}
+
+function persistQuickMessages() {
+  const messages = normalizeQuickMessages(state.quickMessages)
+  if (messages.length !== state.quickMessages.length) return false
+  try {
+    localStorage.setItem(QUICK_MESSAGES_KEY, JSON.stringify(messages))
+    state.quickMessages = messages
+    return true
+  } catch {
+    return false
+  }
 }
 
 function decodeRoutePart(value) {
@@ -902,6 +927,35 @@ function notificationSupport() {
   return window.isSecureContext && "Notification" in window && "serviceWorker" in navigator && "PushManager" in window
 }
 
+function renderQuickMessageSettings() {
+  const modes = state.agents.map((agent) => agent.name)
+  const items = state.quickMessages.length ? `<div class="quick-message-rows">${state.quickMessages.map((item, index) => `<div class="quick-message-row">
+    <span><strong>${esc(item.name)}</strong><small class="quick-message-mode ${item.mode === "plan" ? "plan" : "default"}">${esc(titleCase(item.mode))}</small></span>
+    <div class="quick-message-row-actions">
+      <button type="button" class="icon-button" data-move-quick-message="up" data-quick-message-index="${index}" aria-label="Move ${esc(item.name)} up" ${index === 0 ? "disabled" : ""}>↑</button>
+      <button type="button" class="icon-button" data-move-quick-message="down" data-quick-message-index="${index}" aria-label="Move ${esc(item.name)} down" ${index === state.quickMessages.length - 1 ? "disabled" : ""}>↓</button>
+      <button type="button" class="icon-button" data-edit-quick-message data-quick-message-index="${index}" aria-label="Edit ${esc(item.name)}" title="Edit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4.2-1 10.6-10.6a2 2 0 0 0-2.8-2.8L5.4 16.2 4 20Z"></path><path d="m14.5 7.1 2.8 2.8"></path></svg></button>
+      <button type="button" class="icon-button danger" data-remove-quick-message data-quick-message-index="${index}" aria-label="Remove ${esc(item.name)}">×</button>
+    </div>
+  </div>`).join("")}</div>` : `<div class="quick-message-settings-empty">No quick messages yet.</div>`
+  const edit = state.quickMessageEditor
+  const modeChoices = edit ? [...new Set([...modes, edit.mode].filter(Boolean))] : []
+  const editor = edit ? `<form class="quick-message-settings" data-quick-message-settings>
+    <fieldset class="quick-message-editor" data-quick-message-editor>
+      <div class="quick-message-editor-header"><strong>${edit.index < 0 ? "New quick message" : `Edit ${esc(state.quickMessages[edit.index]?.name || "quick message")}`}</strong></div>
+      <label><span>Name</span><input name="name" value="${esc(edit.name)}" maxlength="100" required autocomplete="off"></label>
+      <label><span>Message</span><textarea name="message" rows="3" maxlength="10000" required>${esc(edit.message)}</textarea></label>
+      <label><span>Mode</span><select name="mode" class="quick-message-mode ${edit.mode === "plan" ? "plan" : "default"}" required>${edit.mode ? "" : `<option value="" selected disabled>Select mode</option>`}${modeChoices.map((mode) => `<option value="${esc(mode)}" ${mode === edit.mode ? "selected" : ""}>${esc(titleCase(mode))}${modes.includes(mode) ? "" : " (unavailable)"}</option>`).join("")}</select></label>
+      <div class="quick-message-editor-actions"><button type="button" class="button" data-cancel-quick-message>Cancel</button><button type="submit" class="button primary">${edit.index < 0 ? "Add" : "Save changes"}</button></div>
+    </fieldset>
+  </form>` : ""
+  return `<section class="settings-section">
+    <div class="settings-section-header"><span><strong>Quick messages</strong><small>Press Send with an empty composer to choose one.</small></span><button type="button" class="button quick-message-add" data-add-quick-message aria-label="Add quick message" title="Add quick message" ${edit ? "disabled" : ""}>+</button></div>
+    ${items}
+    ${editor}
+  </section>`
+}
+
 function renderNotificationSettings() {
   if (!state.notificationsOpen) return ""
   const subscribed = Boolean(state.notificationSubscription)
@@ -923,23 +977,27 @@ function renderNotificationSettings() {
     </label>
   </div>`
   return `<div class="notification-overlay">
-    <button type="button" class="notification-backdrop" data-close-notifications aria-label="Close notification settings"></button>
+    <button type="button" class="notification-backdrop" data-close-notifications aria-label="Close settings"></button>
     <section class="notification-drawer" role="dialog" aria-modal="true" aria-labelledby="notification-title">
       <header class="notification-header">
-        <div><h2 id="notification-title">Notifications</h2><p>${state.notificationBusy ? "Saving…" : "Configure each destination independently."}</p></div>
-        <button type="button" class="icon-button" data-close-notifications aria-label="Close notification settings">×</button>
+        <div><h2 id="notification-title">Settings</h2><p>${state.notificationBusy ? "Saving…" : "Stored on this browser unless noted otherwise."}</p></div>
+        <button type="button" class="icon-button" data-close-notifications aria-label="Close settings">×</button>
       </header>
       <div class="notification-content">
-        <section class="notification-backend">
+        ${renderQuickMessageSettings()}
+        <section class="settings-section">
+          <div class="settings-section-title"><strong>Notifications</strong><small>Configure each destination independently.</small></div>
+          <div class="notification-backend">
           <div class="notification-backend-header"><span><strong>Browser on this device</strong><small>${esc(browserStatus)}</small></span><span class="badge ${subscribed ? "idle" : ""}">${subscribed ? "on" : "off"}</span></div>
           ${choices("browser", state.notificationPreferences, !subscribed || state.notificationBusy)}
           <button type="button" class="button ${subscribed ? "danger" : "primary"} notification-toggle" data-${subscribed ? "disable" : "enable"}-notifications ${state.notificationBusy || denied || !notificationSupport() ? "disabled" : ""}>${subscribed ? "Disable on this device" : "Enable on this device"}</button>
-        </section>
-        ${ntfy.available ? `<section class="notification-backend">
+          </div>
+          ${ntfy.available ? `<div class="notification-backend">
           <div class="notification-backend-header"><span><strong>ntfy</strong><small>Shared destination configured on the Pocket server.</small></span><span class="badge ${ntfy.enabled ? "idle" : ""}">${ntfy.enabled ? "on" : "off"}</span></div>
           ${choices("ntfy", ntfy.preferences, !ntfy.enabled || state.notificationBusy)}
           <button type="button" class="button ${ntfy.enabled ? "danger" : "primary"} notification-toggle" data-toggle-ntfy ${state.notificationBusy ? "disabled" : ""}>${ntfy.enabled ? "Disable ntfy" : "Enable ntfy"}</button>
-        </section>` : ""}
+          </div>` : ""}
+        </section>
       </div>
     </section>
   </div>`
@@ -1086,6 +1144,47 @@ async function saveNtfySettings(update) {
   render()
 }
 
+function saveQuickMessageSettings() {
+  const edit = state.quickMessageEditor
+  if (!edit) return false
+  const form = app.querySelector("[data-quick-message-settings]")
+  if (form) {
+    edit.name = form.elements.name.value
+    edit.message = form.elements.message.value
+    edit.mode = form.elements.mode.value
+  }
+  const [message] = normalizeQuickMessages([edit])
+  const duplicate = message && state.quickMessages.some((item, index) => index !== edit.index && item.name.toLocaleLowerCase() === message.name.toLocaleLowerCase())
+  if (!message || duplicate) {
+    showToast("Give the quick message a unique name, message, and mode.")
+    return false
+  }
+  const previous = state.quickMessages
+  const next = [...previous]
+  if (edit.index < 0) next.push(message)
+  else next[edit.index] = message
+  state.quickMessages = next
+  if (!persistQuickMessages()) {
+    state.quickMessages = previous
+    showToast("Quick messages could not be saved in this browser.")
+    return false
+  }
+  state.quickMessageEditor = null
+  showToast("Quick message saved")
+  state.renderedNotifications = ""
+  state.renderedQuickMessages = ""
+  render()
+  return true
+}
+
+function closeSettings() {
+  state.quickMessages = loadQuickMessages()
+  state.quickMessageEditor = null
+  state.notificationsOpen = false
+  state.renderedQuickMessages = ""
+  render()
+}
+
 function renderConversationShell(empty = false) {
   const draft = empty ? "" : state.messageDrafts.get(conversationKey()) || ""
   return `<div class="shell conversation${empty ? " empty-conversation" : ""}">
@@ -1121,7 +1220,7 @@ function renderConversationShell(empty = false) {
         <header class="agent-drawer-header">
           <div><h2 id="agent-drawer-title">OpenCode instances</h2><p data-agent-drawer-summary></p></div>
           <div class="agent-drawer-actions">
-            <button type="button" class="icon-button notification-button${state.notificationSubscription || state.ntfySettings.enabled ? " enabled" : ""}" data-notifications aria-label="Notification settings" title="Notification settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg></button>
+            <button type="button" class="icon-button notification-button${state.notificationSubscription || state.ntfySettings.enabled ? " enabled" : ""}" data-notifications aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.5 19.3a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.7 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.5 4.7a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.1.38.3.72.6 1 .3.28.7.42 1.1.4h.09v4h-.09A1.7 1.7 0 0 0 19.4 15Z"></path></svg></button>
             <button type="button" class="icon-button refresh-button" data-refresh aria-label="Refresh instances" title="Refresh"><span aria-hidden="true">↻</span></button>
             <button type="button" class="icon-button" data-close-agents aria-label="Close instances">×</button>
           </div>
@@ -1172,6 +1271,16 @@ function renderConversationShell(empty = false) {
         <div class="model-content" data-model-content></div>
       </section>
     </div>
+    <div class="quick-message-overlay" data-quick-message-overlay hidden>
+      <button type="button" class="quick-message-backdrop" data-close-quick-messages aria-label="Close quick messages"></button>
+      <section class="quick-message-drawer" role="dialog" aria-modal="true" aria-labelledby="quick-message-title">
+        <header class="quick-message-header">
+          <div><h2 id="quick-message-title">Quick messages</h2><p>Choose one to switch mode and send immediately.</p></div>
+          <button type="button" class="icon-button" data-close-quick-messages aria-label="Close quick messages">×</button>
+        </header>
+        <div class="quick-message-content" data-quick-message-content></div>
+      </section>
+    </div>
     <div data-notification-settings></div>
     <div class="composer-wrap" ${empty ? "hidden" : ""}>
       <button type="button" class="scroll-latest" data-scroll-latest hidden>Scroll to bottom <span aria-hidden="true">↓</span></button>
@@ -1208,7 +1317,7 @@ function renderConversationShell(empty = false) {
             <span class="activity-ring" aria-hidden="true"></span>
             <span class="stop-square" aria-hidden="true"></span>
           </button>
-          <button type="submit" class="send-button" aria-label="Send message" title="Send message">
+          <button type="submit" class="send-button" data-send-message aria-label="Send message" title="Send message">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="m22 2-11 11"></path></svg>
           </button>
         </div>
@@ -1306,6 +1415,35 @@ function updateModelSheet() {
   }).join("") : `<div class="models-empty">No matching models.</div>`
 }
 
+function setQuickMessagesOpen(open, replaceDraft = false) {
+  state.quickMessagesOpen = open
+  state.quickMessagesReplaceDraft = open && replaceDraft
+  document.body.classList.toggle("quick-messages-open", open)
+  updateQuickMessagesSheet()
+}
+
+function updateQuickMessagesSheet() {
+  const overlay = app.querySelector("[data-quick-message-overlay]")
+  const content = app.querySelector("[data-quick-message-content]")
+  if (!overlay || !content) return
+  overlay.hidden = !state.quickMessagesOpen
+  if (!state.quickMessagesOpen) return
+  const agents = state.agentSessionId === conversationKey() ? state.agents : []
+  const warning = state.quickMessagesReplaceDraft ? `<div class="quick-message-warning"><strong>Current input will be cleared</strong><small>Choosing a quick message replaces your draft and removes its attachments.</small></div>` : ""
+  const choices = state.quickMessages.length ? state.quickMessages.map((item, index) => {
+    const available = quickMessageModeAvailable(item, agents)
+    return `<button type="button" class="quick-message-choice" data-send-quick-message="${index}" ${available && state.quickMessageSending !== conversationKey() ? "" : "disabled"}>
+      <span><strong>${esc(item.name)}</strong><small>${esc(item.message)}</small></span>
+      <em class="badge quick-message-mode ${item.mode === "plan" ? "plan" : "default"}${available ? "" : " attention"}">${esc(titleCase(item.mode))}${available ? "" : " unavailable"}</em>
+    </button>`
+  }).join("") : `<div class="quick-message-empty"><p>No quick messages configured.</p><button type="button" class="button primary" data-open-quick-message-settings>Open Settings</button></div>`
+  const html = `${warning}${choices}`
+  if (state.renderedQuickMessages !== html) {
+    content.innerHTML = html
+    state.renderedQuickMessages = html
+  }
+}
+
 function selectModel(providerID, modelID) {
   const agent = selectedAgent()
   const model = state.models.find((item) => item.providerID === providerID && item.modelID === modelID)
@@ -1331,8 +1469,9 @@ async function switchAgent(agent) {
   const iid = state.routeInstanceId
   const sid = state.routeSessionId
   const key = conversationKey(iid, sid)
-  if (!agent || !key || state.switchingAgentSession === key) return
+  if (!agent || !key || state.switchingAgentSession === key) return false
   const previous = state.selectedAgents.get(key)
+  if (previous === agent) return true
   state.selectedAgents.set(key, agent)
   state.switchingAgentSession = key
   updateAgentSelector()
@@ -1342,14 +1481,42 @@ async function switchAgent(agent) {
       method: "POST",
       body: JSON.stringify({ agent }),
     })
+    return true
   } catch (error) {
     if (previous) state.selectedAgents.set(key, previous)
     else state.selectedAgents.delete(key)
     showToast(error.message)
+    return false
   } finally {
     if (state.switchingAgentSession === key) state.switchingAgentSession = ""
     if (routeMatches(iid, sid)) updateAgentSelector()
   }
+}
+
+async function sendQuickMessage(index) {
+  const item = state.quickMessages[index]
+  const key = conversationKey()
+  const form = app.querySelector("[data-composer]")
+  const textarea = form?.elements.message
+  if (!item || !key || !textarea || state.quickMessageSending === key || state.sendingMessages.has(key)) return
+  if (state.agentSessionId !== key || !quickMessageModeAvailable(item, state.agents)) return showToast(`${item.mode} mode is not available in this session.`)
+  const replaceDraft = state.quickMessagesReplaceDraft
+  state.quickMessageSending = key
+  setQuickMessagesOpen(false)
+  if (replaceDraft) state.messageAttachments.delete(key)
+  textarea.value = item.message
+  textarea.dispatchEvent(new Event("input", { bubbles: true }))
+  textarea.readOnly = true
+  textarea.focus({ preventScroll: true })
+  updateAttachmentView()
+  const switched = await switchAgent(item.mode)
+  if (state.quickMessageSending === key) state.quickMessageSending = ""
+  if (textarea.isConnected) textarea.readOnly = false
+  if (key === conversationKey()) updateAttachmentView()
+  if (!switched || key !== conversationKey() || !form.isConnected) return
+  textarea.focus({ preventScroll: true })
+  if (selectedAgent() !== item.mode) return showToast("Mode changed before the quick message could be sent.")
+  form.requestSubmit()
 }
 
 function updateAttention(force = false) {
@@ -1581,6 +1748,7 @@ function updateConversation(session) {
   updateDictationButton()
   resizeComposerTextarea()
   updateAgentSelector()
+  updateQuickMessagesSheet()
   updateChangesView()
   updateNotificationSettingsView()
   updateSessionsView()
@@ -1613,6 +1781,7 @@ function render() {
       state.viewKey = "conversation-empty"
       state.renderedAgentNavigation = ""
       state.renderedNotifications = ""
+      state.renderedQuickMessages = ""
     }
     updateEmptyConversation()
     return
@@ -1639,6 +1808,7 @@ function render() {
     state.renderedSessions = ""
     state.renderedAgentNavigation = ""
     state.renderedNotifications = ""
+    state.renderedQuickMessages = ""
     state.attentionRequest = ""
     state.attentionCollapsed = false
     state.followMessages = true
@@ -1710,12 +1880,13 @@ function updateAttachmentView() {
   const attachments = state.messageAttachments.get(key) || []
   const loading = (state.loadingAttachments.get(key) || 0) > 0
   const sending = state.sendingMessages.has(key)
+  const quickSending = state.quickMessageSending === key
   previews.hidden = attachments.length === 0
   previews.innerHTML = renderAttachmentPreviews()
-  attach.disabled = loading || sending || attachments.length >= MAX_IMAGE_COUNT
+  attach.disabled = loading || sending || quickSending || attachments.length >= MAX_IMAGE_COUNT
   attach.setAttribute("aria-label", loading ? "Images are loading" : attachments.length >= MAX_IMAGE_COUNT ? "Maximum images attached" : "Attach images")
-  send.disabled = loading || sending
-  send.setAttribute("aria-label", loading ? "Images are loading" : sending ? "Sending message" : "Send message")
+  send.disabled = loading || sending || quickSending
+  send.setAttribute("aria-label", loading ? "Images are loading" : sending || quickSending ? "Sending message" : "Send message")
   updateComposerInset()
 }
 
@@ -2128,6 +2299,47 @@ async function createAndOpenSession() {
   }
 }
 
+let sendHold = null
+let suppressSendClickUntil = 0
+
+function cancelSendHold(pointerId) {
+  if (!sendHold || (pointerId !== undefined && sendHold.pointerId !== pointerId)) return
+  clearTimeout(sendHold.timer)
+  sendHold = null
+}
+
+app.addEventListener("pointerdown", (event) => {
+  const button = event.target.closest("[data-send-message]")
+  if (!button || !event.isPrimary || button.disabled) return
+  cancelSendHold()
+  const hold = {
+    pointerId: event.pointerId,
+    x: event.clientX,
+    y: event.clientY,
+    timer: 0,
+  }
+  hold.timer = setTimeout(() => {
+    if (sendHold !== hold || !button.isConnected || button.disabled) return
+    suppressSendClickUntil = performance.now() + 1_000
+    const textarea = app.querySelector("[data-composer] textarea")
+    const hasDraft = Boolean(textarea?.value || (state.messageAttachments.get(conversationKey()) || []).length)
+    setQuickMessagesOpen(true, hasDraft)
+    requestAnimationFrame(() => app.querySelector("[data-send-quick-message]:not(:disabled), [data-open-quick-message-settings], [data-close-quick-messages]:not(.quick-message-backdrop)")?.focus())
+  }, 550)
+  sendHold = hold
+})
+
+app.addEventListener("pointermove", (event) => {
+  if (!sendHold || sendHold.pointerId !== event.pointerId) return
+  if (Math.hypot(event.clientX - sendHold.x, event.clientY - sendHold.y) > 10) cancelSendHold(event.pointerId)
+})
+
+app.addEventListener("pointerup", (event) => cancelSendHold(event.pointerId))
+app.addEventListener("pointercancel", (event) => cancelSendHold(event.pointerId))
+app.addEventListener("contextmenu", (event) => {
+  if (event.target.closest("[data-send-message]")) event.preventDefault()
+})
+
 app.addEventListener("pointerdown", (event) => {
   const textarea = event.target.closest("[data-composer] textarea")
   if (textarea) beginComposerReveal(textarea)
@@ -2146,6 +2358,15 @@ app.addEventListener("focusin", (event) => {
 
 app.addEventListener("input", (event) => {
   const input = event.target
+  const quickMessageEditor = input.closest("[data-quick-message-editor]")
+  if (quickMessageEditor && ["name", "message", "mode"].includes(input.name)) {
+    if (state.quickMessageEditor) state.quickMessageEditor[input.name] = input.value
+    if (input.name === "mode") {
+      input.classList.toggle("plan", input.value === "plan")
+      input.classList.toggle("default", input.value !== "plan")
+    }
+    return
+  }
   if (input.matches("[data-composer] textarea")) {
     resizeComposerTextarea(input)
     const key = conversationKey()
@@ -2196,6 +2417,22 @@ app.addEventListener("toggle", (event) => {
 }, true)
 
 app.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.quickMessagesOpen) {
+    event.preventDefault()
+    setQuickMessagesOpen(false)
+    app.querySelector("[data-composer] .send-button")?.focus()
+    return
+  }
+  if (state.quickMessagesOpen && event.key === "Tab") {
+    const controls = [...app.querySelectorAll("[data-quick-message-overlay] button:not(:disabled)")]
+    if (!controls.length) return
+    const next = event.shiftKey ? controls.at(-1) : controls[0]
+    if (!controls.includes(document.activeElement) || (event.shiftKey && document.activeElement === controls[0]) || (!event.shiftKey && document.activeElement === controls.at(-1))) {
+      event.preventDefault()
+      next.focus()
+    }
+    return
+  }
   if (event.key === "Escape" && state.modelPickerOpen) {
     event.preventDefault()
     setModelPickerOpen(false)
@@ -2218,8 +2455,7 @@ app.addEventListener("keydown", (event) => {
   }
   if (event.key === "Escape" && state.notificationsOpen) {
     event.preventDefault()
-    state.notificationsOpen = false
-    render()
+    closeSettings()
     return
   }
   if (state.conversationActionsOpen && event.key === "Escape") {
@@ -2301,6 +2537,12 @@ app.addEventListener("click", async (event) => {
   const target = event.target.closest("button")
   if (!target) return
 
+  if (target.hasAttribute("data-send-message") && performance.now() < suppressSendClickUntil) {
+    event.preventDefault()
+    suppressSendClickUntil = 0
+    return
+  }
+
   if (target.hasAttribute("data-toggle-conversation-actions")) {
     setConversationActionsOpen(!state.conversationActionsOpen)
     return
@@ -2370,6 +2612,24 @@ app.addEventListener("click", async (event) => {
     setModelPickerOpen(false)
     return
   }
+  if (target.hasAttribute("data-close-quick-messages")) {
+    setQuickMessagesOpen(false)
+    app.querySelector("[data-composer] .send-button")?.focus()
+    return
+  }
+  if (target.dataset.sendQuickMessage !== undefined) {
+    await sendQuickMessage(Number(target.dataset.sendQuickMessage))
+    return
+  }
+  if (target.hasAttribute("data-open-quick-message-settings")) {
+    setQuickMessagesOpen(false)
+    state.notificationsOpen = true
+    state.renderedNotifications = ""
+    render()
+    loadNotificationSettings()
+    requestAnimationFrame(() => app.querySelector("[data-add-quick-message]")?.focus())
+    return
+  }
   if (target.dataset.modelProvider && target.dataset.modelId) {
     selectModel(target.dataset.modelProvider, target.dataset.modelId)
     return
@@ -2406,8 +2666,7 @@ app.addEventListener("click", async (event) => {
     return
   }
   if (target.hasAttribute("data-close-notifications")) {
-    state.notificationsOpen = false
-    render()
+    closeSettings()
     return
   }
   if (target.hasAttribute("data-enable-notifications")) {
@@ -2420,6 +2679,70 @@ app.addEventListener("click", async (event) => {
   }
   if (target.hasAttribute("data-toggle-ntfy")) {
     await saveNtfySettings({ enabled: !state.ntfySettings.enabled })
+    return
+  }
+  if (target.hasAttribute("data-add-quick-message")) {
+    state.quickMessageEditor = { index: -1, name: "", message: "", mode: selectedAgent() || "" }
+    state.renderedNotifications = ""
+    render()
+    requestAnimationFrame(() => app.querySelector("[data-quick-message-editor] [name=name]")?.focus())
+    return
+  }
+  if (target.hasAttribute("data-edit-quick-message")) {
+    const index = Number(target.dataset.quickMessageIndex)
+    const item = state.quickMessages[index]
+    if (!item) return
+    state.quickMessageEditor = { index, ...item }
+    state.renderedNotifications = ""
+    render()
+    requestAnimationFrame(() => app.querySelector("[data-quick-message-editor] [name=name]")?.focus())
+    return
+  }
+  if (target.hasAttribute("data-cancel-quick-message")) {
+    state.quickMessageEditor = null
+    state.renderedNotifications = ""
+    render()
+    requestAnimationFrame(() => app.querySelector("[data-add-quick-message]")?.focus())
+    return
+  }
+  if (target.hasAttribute("data-remove-quick-message")) {
+    const index = Number(target.dataset.quickMessageIndex)
+    const previous = state.quickMessages
+    state.quickMessages = previous.filter((_, itemIndex) => itemIndex !== index)
+    if (!persistQuickMessages()) {
+      state.quickMessages = previous
+      showToast("Quick message could not be deleted.")
+      return
+    }
+    if (state.quickMessageEditor?.index === index) state.quickMessageEditor = null
+    else if (state.quickMessageEditor?.index > index) state.quickMessageEditor.index -= 1
+    state.renderedQuickMessages = ""
+    state.renderedNotifications = ""
+    showToast("Quick message deleted")
+    render()
+    return
+  }
+  if (target.dataset.moveQuickMessage) {
+    const index = Number(target.dataset.quickMessageIndex)
+    const next = target.dataset.moveQuickMessage === "up" ? index - 1 : index + 1
+    if (index >= 0 && next >= 0 && next < state.quickMessages.length) {
+      const previous = state.quickMessages
+      const reordered = [...previous]
+      const [item] = reordered.splice(index, 1)
+      reordered.splice(next, 0, item)
+      state.quickMessages = reordered
+      if (!persistQuickMessages()) {
+        state.quickMessages = previous
+        showToast("Quick messages could not be reordered.")
+        return
+      }
+      if (state.quickMessageEditor?.index === index) state.quickMessageEditor.index = next
+      else if (state.quickMessageEditor?.index === next) state.quickMessageEditor.index = index
+      state.renderedQuickMessages = ""
+      state.renderedNotifications = ""
+      render()
+      requestAnimationFrame(() => app.querySelector(`[data-move-quick-message="${target.dataset.moveQuickMessage}"][data-quick-message-index="${next}"]`)?.focus())
+    }
     return
   }
   if (target.hasAttribute("data-open-sessions")) {
@@ -2536,6 +2859,12 @@ app.addEventListener("click", async (event) => {
 })
 
 app.addEventListener("submit", async (event) => {
+  const quickMessageSettings = event.target.closest("[data-quick-message-settings]")
+  if (quickMessageSettings) {
+    event.preventDefault()
+    saveQuickMessageSettings()
+    return
+  }
   const form = event.target.closest("[data-composer]")
   if (!form) return
   event.preventDefault()
@@ -2546,9 +2875,14 @@ app.addEventListener("submit", async (event) => {
   const iid = state.routeInstanceId
   const key = conversationKey(iid, sid)
   if ((state.loadingAttachments.get(key) || 0) > 0) return showToast("Wait for images to finish loading")
+  if (state.quickMessageSending === key) return
   if (state.sendingMessages.has(key)) return
   const attachments = [...(state.messageAttachments.get(key) || [])]
-  if (!text && attachments.length === 0) return
+  if (!text && attachments.length === 0) {
+    setQuickMessagesOpen(true)
+    requestAnimationFrame(() => app.querySelector("[data-send-quick-message]:not(:disabled), [data-open-quick-message-settings], [data-close-quick-messages]:not(.quick-message-backdrop)")?.focus())
+    return
+  }
   const agent = state.selectedAgents.get(key) || ""
   const model = currentModel()
   if (!model?.providerID || !model?.modelID) return showToast("Select a model before sending.")
@@ -2581,8 +2915,9 @@ app.addEventListener("submit", async (event) => {
 window.addEventListener("hashchange", () => {
   stopDictation(true)
   setStopConfirmation(null)
-  document.body.classList.remove("changes-open", "sessions-open", "agent-drawer-open", "model-open")
+  document.body.classList.remove("changes-open", "sessions-open", "agent-drawer-open", "model-open", "quick-messages-open")
   state.modelPickerOpen = false
+  state.quickMessagesOpen = false
   clearTimeout(state.refreshTimer)
   clearTimeout(state.changesTimer)
   clearTimeout(state.scrollToLatestTimer)

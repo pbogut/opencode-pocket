@@ -186,8 +186,11 @@ From a conversation:
 - attach images from the picker or paste screenshots into the composer; remove unwanted previews before sending
 - open the changes view to inspect changed turns and load file diffs on demand
 - tap the microphone button for live dictation when the browser supports the Web Speech API
+- press Send with an empty composer to choose a quick message, or hold Send to replace the current draft; choosing one switches to its configured mode and sends it
 
 Dictation appends interim and final speech to the current draft and never sends automatically. Sending a message or changing sessions stops recognition. Android uses non-continuous recognition, and microphone denial or recognition failures appear as a toast.
+
+The instance drawer's Settings button opens notification controls and the quick message editor. Each quick message has a name, prompt, and OpenCode mode. Quick messages are stored in `localStorage`, so they persist across browser restarts but remain local to that browser and Pocket origin. A quick message whose mode is unavailable in the current session remains visible but cannot be sent.
 
 Model selections are tracked independently for each instance, session, and mode. An unsent browser selection remains local to that browser. After a PWA or TUI submits a real user message, the model recorded on that message becomes authoritative for the mode; OpenCode-generated synthetic continuation messages are ignored.
 
@@ -211,7 +214,7 @@ OpenCode instances
 
 Keep Pocket and OpenCode bound to `127.0.0.1`, then expose Pocket with Tailscale Serve. This is the recommended architecture and avoids exposing OpenCode's powerful API directly to the LAN or internet. A manually configured `OPENCODE_URL` is not restricted to loopback, so secure any remote OpenCode server separately.
 
-After opening the HTTPS Pocket URL, install the PWA, open the instance drawer, and use its bell button to open notification settings. Enable notifications for that device, then choose whether to receive blockers, completed tasks, or both. Blockers cover questions and permission requests. Completion notifications apply to successful root-session transitions from working or retrying to idle; child sessions and sessions ending in error do not produce them.
+After opening the HTTPS Pocket URL, install the PWA, open the instance drawer, and use its Settings button to open notification settings. Enable notifications for that device, then choose whether to receive blockers, completed tasks, or both. Blockers cover questions and permission requests. Completion notifications apply to successful root-session transitions from working or retrying to idle; child sessions and sessions ending in error do not produce them.
 
 Pocket supports Web Push and ntfy as independent notification destinations. Each browser stores its own blocker and completion choices. Configuring an ntfy topic makes that destination available; enable it and choose its events in the notification panel. This lets a phone use ntfy while a laptop uses browser notifications. Pocket clears ntfy blocker notifications after the question or permission is resolved. Opening a completed session in a visible Pocket window clears its ntfy and Web Push completion notifications; a background window leaves them in place. Web Push blockers are suppressed while any Pocket window is visible. Notification text is generic on the lock screen; tapping it opens the affected session.
 
