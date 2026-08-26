@@ -29,6 +29,7 @@ button { color: inherit; }
 .conversation-topbar .topbar-row > .icon-button { min-width: 36px; height: 36px; border-radius: 10px; padding: 7px 9px; }
 .icon-button, .button { border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 10px 12px; cursor: pointer; }
 .icon-button { min-width: 42px; }
+.agent-drawer-button.offline-disabled { border-color: var(--line); background: var(--surface); color: var(--muted); opacity: 1; cursor: default; }
 .notification-button { position: relative; display: grid; place-items: center; }
 .notification-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .notification-button.enabled::after { position: absolute; top: 7px; right: 7px; width: 7px; height: 7px; border: 2px solid var(--surface); border-radius: 50%; background: var(--ok); content: ""; }
@@ -75,6 +76,7 @@ button { color: inherit; }
 .agent-card .badge.idle::before { border: 1.5px solid currentColor; background: transparent; }
 .agent-card .badge.busy::before, .agent-card .badge.retry::before, .agent-card .badge.attention::before { background: currentColor; }
 .agent-radar { min-width: 0; display: flex; align-items: center; gap: 7px; overflow: hidden; }
+.agent-radar[hidden], .agent-swipe-edge[hidden] { display: none; }
 .agent-summary { height: 36px; flex: none; display: flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 4px 9px; cursor: pointer; }
 .agent-count { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .agent-count i, .agent-alert i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: currentColor; }

@@ -96,6 +96,8 @@ const state = {
   quickMessagesReplaceDraft: false,
   quickMessageSending: "",
   agentSort: loadAgentSort(),
+  serverOffline: false,
+  retryingServer: false,
 }
 
 function draftEntries(value) {
@@ -303,6 +305,7 @@ function reconcileTuiRoute() {
 }
 
 function applySnapshot(snapshot) {
+  state.serverOffline = false
   state.snapshot = snapshot
   const navigated = reconcileTuiRoute()
   if (!navigated) render()
@@ -317,11 +320,28 @@ function pendingPermission(instanceId, sessionId) {
   return state.snapshot.permissions.find((item) => item.instanceId === instanceId && sessionContains(instanceId, sessionId, requestSessionId(item)))
 }
 
+function setServerOffline() {
+  state.serverOffline = true
+  state.toast = ""
+  clearTimeout(showToast.timer)
+  render()
+}
+
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers || {}) },
-  })
+  let response
+  try {
+    response = await fetch(path, {
+      ...options,
+      headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers || {}) },
+    })
+  } catch {
+    setServerOffline()
+    throw new Error("Server is currently offline")
+  }
+  if ([502, 503, 504].includes(response.status)) {
+    setServerOffline()
+    throw new Error("Server is currently offline")
+  }
   const text = await response.text()
   let data = null
   if (text) { try { data = JSON.parse(text) } catch { data = text } }
@@ -361,17 +381,18 @@ function acknowledgeVisibleCompletion(instanceId = state.routeInstanceId, sessio
 }
 
 function showToast(text) {
+  if (state.serverOffline) return
   state.toast = text
   render()
   clearTimeout(showToast.timer)
   showToast.timer = setTimeout(() => { state.toast = ""; render() }, 2600)
 }
 
-async function loadState({ quiet = false } = {}) {
+async function loadState() {
   try {
     return applySnapshot(await api("/api/state"))
-  } catch (error) {
-    if (!quiet) showToast(error.message)
+  } catch {
+    setServerOffline()
     return false
   }
 }
@@ -1185,14 +1206,14 @@ function closeSettings() {
   render()
 }
 
-function renderConversationShell(empty = false) {
+function renderConversationShell(empty = false, offline = false) {
   const draft = empty ? "" : state.messageDrafts.get(conversationKey()) || ""
   return `<div class="shell conversation${empty ? " empty-conversation" : ""}">
     <header class="topbar conversation-topbar">
       <div class="topbar-row">
-        <button class="icon-button agent-drawer-button" data-open-agents aria-label="Open instances" title="Open instances">☰</button>
+        <button class="icon-button agent-drawer-button${offline ? " offline-disabled" : ""}" data-open-agents aria-label="Open instances" title="Open instances" ${offline ? 'aria-disabled="true"' : ""}>☰</button>
         <h1 class="session-title" data-session-title>${empty ? "OpenCode Pocket" : ""}</h1>
-        <div class="agent-radar" data-agent-radar></div>
+        <div class="agent-radar" data-agent-radar ${offline ? "hidden" : ""}></div>
         <div class="conversation-actions" data-conversation-actions ${empty ? "hidden" : ""}>
           <button class="icon-button conversation-actions-button" data-toggle-conversation-actions aria-label="Conversation actions" aria-haspopup="menu" aria-expanded="false" title="Conversation actions"><span aria-hidden="true">⋮</span></button>
           <div class="conversation-actions-menu" data-conversation-actions-menu role="menu" hidden>
@@ -1210,10 +1231,12 @@ function renderConversationShell(empty = false) {
     <div class="meta" data-session-meta ${empty ? "hidden" : ""}></div>
     <div data-messages>${empty ? `<div class="no-session">
       <img src="/icon.svg" alt="" width="88" height="88">
-      <strong>Select an OpenCode instance</strong>
-      <button type="button" class="select-instance-button" data-open-agents><span aria-hidden="true">☰</span>Select instance</button>
+      <strong>${offline ? "Server is currently offline" : "Select an OpenCode instance"}</strong>
+      ${offline
+        ? `<button type="button" class="select-instance-button" data-retry-server ${state.retryingServer ? "disabled" : ""}><span aria-hidden="true">↻</span>${state.retryingServer ? "Checking…" : "Retry"}</button>`
+        : `<button type="button" class="select-instance-button" data-open-agents><span aria-hidden="true">☰</span>Select instance</button>`}
     </div>` : ""}</div>
-    <div class="agent-swipe-edge" data-agent-swipe-edge aria-hidden="true"></div>
+    <div class="agent-swipe-edge" data-agent-swipe-edge aria-hidden="true" ${offline ? "hidden" : ""}></div>
     <div class="agent-drawer-overlay" data-agent-drawer-overlay hidden>
       <button type="button" class="agent-drawer-backdrop" data-close-agents aria-label="Close instances"></button>
       <aside class="agent-drawer" role="dialog" aria-modal="true" aria-labelledby="agent-drawer-title">
@@ -1774,6 +1797,20 @@ function updateEmptyConversation() {
 }
 
 function render() {
+  if (state.serverOffline) {
+    state.agentDrawerOpen = false
+    document.body.classList.remove("changes-open", "sessions-open", "agent-drawer-open", "model-open", "quick-messages-open")
+    const key = `server-offline:${state.retryingServer}`
+    if (state.viewKey !== key) {
+      app.innerHTML = renderConversationShell(true, true)
+      state.viewKey = key
+      state.renderedAgentNavigation = ""
+      state.renderedNotifications = ""
+      state.renderedQuickMessages = ""
+    }
+    return
+  }
+
   if (!state.routeSessionId) {
     document.body.classList.remove("changes-open", "sessions-open")
     if (state.viewKey !== "conversation-empty") {
@@ -2582,6 +2619,7 @@ app.addEventListener("click", async (event) => {
     return
   }
   if (target.hasAttribute("data-open-agents")) {
+    if (state.serverOffline) return
     setAgentDrawerOpen(true)
     requestAnimationFrame(() => app.querySelector(".agent-drawer-header [data-close-agents]")?.focus())
     return
@@ -2655,6 +2693,17 @@ app.addEventListener("click", async (event) => {
     target.classList.add("refreshing")
     target.addEventListener("animationend", () => target.classList.remove("refreshing"), { once: true })
     try { applySnapshot(await api("/api/refresh", { method: "POST" })) } catch (error) { showToast(error.message) }
+    return
+  }
+  if (target.hasAttribute("data-retry-server")) {
+    state.retryingServer = true
+    render()
+    try {
+      await loadState()
+    } finally {
+      state.retryingServer = false
+      render()
+    }
     return
   }
   if (target.hasAttribute("data-notifications")) {
@@ -2967,7 +3016,7 @@ function scheduleStateRecovery(delay = 0) {
     if (document.visibilityState !== "visible" || stateRecoveryInFlight) return
     stateRecoveryInFlight = true
     try {
-      await loadState({ quiet: true })
+      await loadState()
     } finally {
       stateRecoveryInFlight = false
     }

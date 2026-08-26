@@ -1,4 +1,4 @@
-const CACHE = "opencode-pocket-v43"
+const CACHE = "opencode-pocket-v47"
 const ACK_CACHE = "opencode-pocket-notification-acks-v1"
 const ASSETS = ["/", "/styles.css", "/app.js", "/agent-sort.js", "/model-state.js", "/notification-state.js", "/quick-message-state.js", "/manifest.webmanifest", "/icon.svg"]
 const acknowledgedCompletions = new Set()
@@ -12,11 +12,15 @@ self.addEventListener("activate", (event) => event.waitUntil(Promise.all([
 ])))
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET" || new URL(event.request.url).pathname.startsWith("/api/")) return
-  event.respondWith(fetch(event.request).then((response) => {
-    const copy = response.clone()
-    caches.open(CACHE).then((cache) => cache.put(event.request, copy))
+  event.respondWith(fetch(event.request).then(async (response) => {
+    if (!response.ok) {
+      const cached = await caches.match(event.request)
+      return cached || (event.request.mode === "navigate" ? await caches.match("/") : undefined) || response
+    }
+    const cache = await caches.open(CACHE)
+    await cache.put(event.request, response.clone())
     return response
-  }).catch(() => caches.match(event.request)))
+  }).catch(() => event.request.mode === "navigate" ? caches.match("/") : caches.match(event.request)))
 })
 
 function acknowledgementRequest(tag) {
