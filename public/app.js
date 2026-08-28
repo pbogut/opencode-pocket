@@ -2,6 +2,7 @@ import { completionId, completionTag, isVisibleSession } from "./notification-st
 import { normalizeAgentSort, sortAgentItems } from "./agent-sort.js"
 import { conversationUsage, isStaleObservation, latestModels, reconcileSelection, supportsImages, visibleMessageParts } from "./model-state.js"
 import { normalizeQuickMessages, quickMessageModeAvailable } from "./quick-message-state.js"
+import { permissionPresentation } from "./permission-state.js"
 
 const app = document.querySelector("#app")
 
@@ -827,13 +828,14 @@ function renderQuestionCard(request) {
 
 function renderPermissionCard(permission) {
   if (!permission) return ""
-  const title = permission.title || permission.type || "Permission request"
-  const pattern = Array.isArray(permission.pattern) ? permission.pattern.join("\n") : permission.pattern || ""
+  const presentation = permissionPresentation(permission)
   const metadata = permission.metadata && Object.keys(permission.metadata).length ? JSON.stringify(permission.metadata, null, 2) : ""
   return `<section class="attention-card" data-permission-id="${esc(permissionId(permission))}">
     <div class="attention-title">Permission requested</div>
-    <h3>${esc(title)}</h3>
-    ${pattern ? `<div class="permission-code">${esc(pattern)}</div>` : ""}
+    <h3>${esc(presentation.title)}</h3>
+    <p class="permission-description">${esc(presentation.description)}</p>
+    ${presentation.targets.length ? `<div class="permission-field"><span>${esc(presentation.targetLabel)}</span><div class="permission-code">${esc(presentation.targets.join("\n"))}</div></div>` : ""}
+    ${presentation.always.length ? `<div class="permission-field"><span>Always allow would cover</span><div class="permission-code">${esc(presentation.always.join("\n"))}</div></div>` : ""}
     ${metadata ? `<details><summary class="meta">Details</summary><div class="permission-code">${esc(metadata)}</div></details>` : ""}
     <div class="actions">
       <button class="button primary" data-permission-response="once">Allow once</button>
