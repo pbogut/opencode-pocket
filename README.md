@@ -232,7 +232,7 @@ make config
 systemctl --user enable --now opencode-pocket
 ```
 
-`make arch-install` builds the package before installing it. To build without installing, use `make package`. Packages are written to `dist/arch/packages`. `make package` builds the current working tree through a temporary source archive. The resulting native package depends on `glibc`; Bun and Git are build-only dependencies. The `-git` PKGBUILD defaults to the latest GitHub commit when used directly or published to AUR. `make arch-check` additionally validates the PKGBUILD and built package with `namcap`.
+`make arch-install` builds the package before installing it. To build without installing, use `make package`. Packages are written to `dist/arch/packages`. `make package` builds the current working tree through a temporary source archive and uses the active Bun from `PATH`, including a mise-managed installation. The resulting native package depends on `glibc`. The `-git` PKGBUILD declares Bun and Git as build dependencies when used directly or published to AUR, and defaults to the latest GitHub commit. `make arch-check` additionally validates the PKGBUILD and built package with `namcap`.
 
 Inspect the service with:
 
