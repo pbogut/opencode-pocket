@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto"
 import http from "node:http"
-import { createReadStream, watch } from "node:fs"
-import { stat } from "node:fs/promises"
+import { watch } from "node:fs"
+import { readFile, stat } from "node:fs/promises"
 import { extname, join, normalize } from "node:path"
 import { fileURLToPath } from "node:url"
 import { loadConfig } from "./config.mjs"
@@ -9,6 +9,7 @@ import { InstanceManager } from "./instances.mjs"
 import { loadPluginToken } from "./plugin-token.mjs"
 import { Notifications } from "./notifications.mjs"
 import { MAX_MESSAGE_BODY_BYTES, validateImageModelSupport, validateMessageInput } from "./message-input.mjs"
+import { publicAssets } from "./public-assets.mjs"
 
 const config = loadConfig()
 const pluginToken = await loadPluginToken(config)
@@ -16,6 +17,7 @@ const manager = new InstanceManager(config)
 const notifications = new Notifications(config)
 await notifications.start()
 const publicDir = fileURLToPath(new URL("../public/", import.meta.url))
+const standalone = publicAssets.get("index.html").startsWith("/$bunfs/")
 const sseClients = new Set()
 const devMode = process.argv.includes("--dev")
 const devServerId = `${process.pid}-${Date.now()}`
@@ -123,17 +125,23 @@ function mime(path) {
 async function serveStatic(req, res, pathname) {
   const relative = pathname === "/" ? "index.html" : pathname.slice(1)
   const safe = normalize(relative).replace(/^(\.\.(\/|\\|$))+/, "")
-  let file = join(publicDir, safe)
+  let file = standalone ? publicAssets.get(safe) : join(publicDir, safe)
+  if (!file) return false
   try {
     const info = await stat(file)
-    if (info.isDirectory()) file = join(file, "index.html")
+    if (info.isDirectory()) {
+      file = join(file, "index.html")
+      await stat(file)
+    }
+    const body = await readFile(file)
     res.writeHead(200, {
       "Content-Type": mime(file),
-      "Cache-Control": devMode ? "no-store" : file.endsWith("index.html") ? "no-cache" : "public, max-age=300",
+      "Content-Length": body.byteLength,
+      "Cache-Control": devMode ? "no-store" : safe === "index.html" ? "no-cache" : "public, max-age=300",
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
     })
-    createReadStream(file).pipe(res)
+    res.end(body)
     return true
   } catch {
     return false

@@ -15,6 +15,7 @@ help:
 		'make dev           Start watch mode with the env.dev profile' \
 		'make test          Run application and plugin tests' \
 		'make check         Run application and plugin syntax checks' \
+		'make build         Compile the standalone executable' \
 		'make verify        Run all tests and syntax checks' \
 		'make package       Build the Arch package under dist/arch' \
 		'make arch-install  Build and install the Arch package' \
@@ -39,7 +40,13 @@ check:
 	bun run check
 	bun run --cwd packages/opencode-pocket-plugin check
 
-verify: test check
+build:
+	bun run build
+
+binary-test: build
+	bun run test:binary
+
+verify: test check binary-test
 
 package: arch-package
 
@@ -60,4 +67,4 @@ arch-check: arch-package
 package-clean:
 	rm -rf "$(ARCH_ROOT)"
 
-.PHONY: help config start dev test check verify package arch-package arch-install arch-check package-clean
+.PHONY: help config start dev test check build binary-test verify package arch-package arch-install arch-check package-clean

@@ -17,8 +17,10 @@
   "scripts": {
     "start": "bun bin/opencode-pocket.mjs",
     "dev": "bun --watch bin/opencode-pocket.mjs --dev",
+    "build": "bun scripts/build.mjs",
     "test": "bun test",
-    "check": "bun scripts/check.mjs 'bin/**/*.mjs' 'src/**/*.mjs' 'public/**/*.js'"
+    "test:binary": "bun scripts/test-binary.mjs ./dist/opencode-pocket",
+    "check": "bun scripts/check.mjs 'bin/**/*.mjs' 'src/**/*.mjs' 'public/**/*.js' 'scripts/**/*.mjs'"
   },
   "engines": {
     "bun": ">=1.3.0"
