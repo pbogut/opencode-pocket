@@ -5,11 +5,12 @@ _pkgname=opencode-pocket
 pkgver=0.1.0.r40.gdfe8586
 pkgrel=1
 pkgdesc="Mobile-first web control surface for OpenCode sessions"
-arch=('any')
+arch=('x86_64' 'aarch64')
 url="https://github.com/pbogut/opencode-pocket"
-license=('MIT')
-depends=('nodejs>=20.12.0')
-makedepends=('git' 'npm')
+license=('MIT' 'MPL-2.0' 'BSD-3-Clause' 'Apache-2.0' 'ISC')
+options=('!strip')
+depends=('glibc')
+makedepends=('bun>=1.3.0' 'git')
 optdepends=('tailscale: private HTTPS access from mobile devices')
 provides=('opencode-pocket')
 conflicts=('opencode-pocket')
@@ -23,7 +24,7 @@ sha256sums=('SKIP')
 pkgver() {
   cd "${_pkgname}"
   local version
-  version=$(node -p "require('./package.json').version")
+  version=$(bun -p "require('./package.json').version")
   if [[ ! -d .git ]]; then
     printf '%s.r0.local' "${version}"
     return
@@ -33,24 +34,23 @@ pkgver() {
 
 build() {
   cd "${_pkgname}"
-  export npm_config_cache="${srcdir}/npm-cache"
-  npm ci --omit=dev --ignore-scripts
+  export BUN_INSTALL_CACHE_DIR="${srcdir}/bun-cache"
+  bun install --frozen-lockfile --ignore-scripts
+  bun run build
 }
 
 check() {
   cd "${_pkgname}"
-  export npm_config_cache="${srcdir}/npm-cache"
-  npm test
-  npm run check
-  npm --prefix packages/opencode-pocket-plugin run check
+  bun run test
+  bun run check
+  bun run --cwd packages/opencode-pocket-plugin check
+  bun run test:binary
 }
 
 package() {
   cd "${_pkgname}"
 
-  install -d "${pkgdir}/usr/lib/${_pkgname}"
-  cp -a bin node_modules public src package.json "${pkgdir}/usr/lib/${_pkgname}/"
-
+  install -Dm755 dist/opencode-pocket "${pkgdir}/usr/bin/opencode-pocket"
   install -Dm644 packages/opencode-pocket-plugin/tui.js "${pkgdir}/usr/lib/${_pkgname}/plugin/tui.js"
   install -Dm644 packaging/systemd/opencode-pocket.service "${pkgdir}/usr/lib/systemd/user/opencode-pocket.service"
   install -Dm644 .env.example "${pkgdir}/usr/share/doc/${_pkgname}/env.example"
@@ -58,7 +58,15 @@ package() {
   install -Dm644 README.md "${pkgdir}/usr/share/doc/${_pkgname}/README.md"
   install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${_pkgname}/LICENSE"
 
-  chmod 755 "${pkgdir}/usr/lib/${_pkgname}/bin/opencode-pocket.mjs"
-  install -d "${pkgdir}/usr/bin"
-  ln -s "/usr/lib/${_pkgname}/bin/opencode-pocket.mjs" "${pkgdir}/usr/bin/opencode-pocket"
+  local license relative package_name
+  shopt -s nullglob
+  for license in node_modules/*/LICENSE* node_modules/*/LICENCE* node_modules/*/license* node_modules/@*/*/LICENSE* node_modules/@*/*/LICENCE* node_modules/@*/*/license*; do
+    relative=${license#node_modules/}
+    package_name=${relative%%/*}
+    if [[ ${package_name} == @* ]]; then
+      relative=${relative#*/}
+      package_name="${package_name}/${relative%%/*}"
+    fi
+    install -Dm644 "${license}" "${pkgdir}/usr/share/licenses/${_pkgname}/vendor/${package_name}/${license##*/}"
+  done
 }

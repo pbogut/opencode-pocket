@@ -3,14 +3,20 @@ pkgbase = opencode-pocket-git
 	pkgver = 0.1.0.r40.gdfe8586
 	pkgrel = 1
 	url = https://github.com/pbogut/opencode-pocket
-	arch = any
+	arch = x86_64
+	arch = aarch64
 	license = MIT
+	license = MPL-2.0
+	license = BSD-3-Clause
+	license = Apache-2.0
+	license = ISC
+	makedepends = bun>=1.3.0
 	makedepends = git
-	makedepends = npm
-	depends = nodejs>=20.12.0
+	depends = glibc
 	optdepends = tailscale: private HTTPS access from mobile devices
 	provides = opencode-pocket
 	conflicts = opencode-pocket
+	options = !strip
 	source = opencode-pocket::git+https://github.com/pbogut/opencode-pocket.git
 	sha256sums = SKIP
 
