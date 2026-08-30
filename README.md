@@ -21,17 +21,19 @@ Current features:
 
 ## Requirements
 
-- Node.js 20.12 or newer
 - OpenCode 1.18.20 or newer for optional TUI synchronization
 - a modern browser with EventSource support; service workers are needed for PWA shell caching
 - HTTPS or another secure context for phone-side PWA installation, notifications, and microphone access
+- Bun 1.3 or newer only when running from a source checkout or building a package
+
+The installed Arch package contains a standalone executable and does not require Bun or Node.js at runtime.
 
 Voice dictation additionally requires the browser Web Speech API. The microphone button is hidden when that API is unavailable.
 
 Install Pocket's dependencies:
 
 ```bash
-npm install
+bun install --frozen-lockfile
 ```
 
 ## 1. Start OpenCode
@@ -73,7 +75,7 @@ Discovery is optional. Pocket can also connect to a fixed server:
 opencode serve --hostname 127.0.0.1 --port 4096
 
 # Terminal 2
-OPENCODE_URL=http://127.0.0.1:4096 npm start
+OPENCODE_URL=http://127.0.0.1:4096 bun run start
 ```
 
 Set `OPENCODE_DISCOVERY=false` to disable mDNS. Authenticated reports from the optional TUI plugin are independent of this setting; omit the plugin as well if Pocket should use only `OPENCODE_URL`. A server started with `opencode serve` has no interactive TUI, so session selection remains independent.
@@ -85,7 +87,7 @@ If OpenCode uses Basic auth, configure the same credentials in Pocket:
 OPENCODE_SERVER_PASSWORD='strong-password' opencode --port 0
 
 # Terminal 2
-OPENCODE_PASSWORD='strong-password' npm start
+OPENCODE_PASSWORD='strong-password' bun run start
 ```
 
 ## 2. Configure Pocket
@@ -98,7 +100,7 @@ $EDITOR ~/.config/opencode-pocket/env
 $EDITOR ~/.config/opencode-pocket/env.dev
 ```
 
-`npm start` and the installed `opencode-pocket` command load `env`. `npm run dev` and `make dev` load `env.dev` and enable watch/live-reload mode. Existing process environment variables take precedence over values from the profile.
+`bun run start` and the installed `opencode-pocket` command load `env`. `bun run dev` and `make dev` load `env.dev` and enable watch/live-reload mode. Existing process environment variables take precedence over values from the profile.
 
 Set `OPENCODE_POCKET_PROFILE=test` or pass `--profile test` to load `env.test`. Set `OPENCODE_POCKET_CONFIG=/path/to/file` or pass `--config /path/to/file` to use an explicit file; an explicit file must exist. Missing default or named profile files are allowed and leave the built-in defaults in effect.
 
@@ -153,7 +155,7 @@ To report the same TUI to production and development Pocket processes, use `pock
 
 Each target has an independent queue, timeout, and retry schedule, so an unavailable development server does not interrupt production reports. The existing singular `pocketUrl` and `url` options remain supported.
 
-If the package is installed from npm, replace the file URL with `"opencode-pocket-plugin/tui"`.
+If the plugin package is installed from the package registry, replace the file URL with `"opencode-pocket-plugin/tui"`.
 
 The plugin and Pocket use the same default token path. To override it, set `OPENCODE_POCKET_TOKEN_FILE` for both processes or add `"tokenFile"` to the plugin options. You may instead provide the token directly through `OPENCODE_POCKET_TOKEN` to both processes.
 
@@ -230,7 +232,7 @@ make config
 systemctl --user enable --now opencode-pocket
 ```
 
-`make arch-install` builds the package before installing it. To build without installing, use `make package`. Packages are written to `dist/arch/packages`. `make package` builds the current working tree through a temporary source archive. The `-git` PKGBUILD defaults to the latest GitHub commit when used directly or published to AUR. `make arch-check` additionally validates the PKGBUILD and built package with `namcap`.
+`make arch-install` builds the package before installing it. To build without installing, use `make package`. Packages are written to `dist/arch/packages`. `make package` builds the current working tree through a temporary source archive. The resulting native package depends on `glibc`; Bun and Git are build-only dependencies. The `-git` PKGBUILD defaults to the latest GitHub commit when used directly or published to AUR. `make arch-check` additionally validates the PKGBUILD and built package with `namcap`.
 
 Inspect the service with:
 
@@ -356,24 +358,26 @@ make verify
 make dev
 ```
 
-The equivalent npm commands are:
+The equivalent Bun commands are:
 
 ```bash
-npm test
-npm run check
-npm run dev
+bun run test
+bun run check
+bun run build
+bun run test:binary
+bun run dev
 ```
 
-`npm test` runs the backend, discovery, instance lifecycle, token, launcher-profile, and bridge tests. `npm run check` performs JavaScript syntax checks; it is not a linter or type checker. Browser interactions, dictation, notifications, and PWA behavior still require manual browser testing.
+`bun run test` runs the backend, discovery, instance lifecycle, token, launcher-profile, bridge, and TUI plugin tests. `bun run check` performs JavaScript syntax checks; it is not a linter or type checker. `bun run build` creates `dist/opencode-pocket`, and `bun run test:binary` verifies that it starts with neither Bun nor Node.js available on `PATH`, serves the embedded PWA, and shuts down cleanly. Browser interactions, dictation, notifications, and PWA behavior still require manual browser testing.
 
 Plugin package checks:
 
 ```bash
-npm --prefix packages/opencode-pocket-plugin test
-npm --prefix packages/opencode-pocket-plugin run check
+bun run --cwd packages/opencode-pocket-plugin test
+bun run --cwd packages/opencode-pocket-plugin check
 ```
 
-`npm run dev` restarts the Node server when backend modules change and reloads connected browsers when backend or `public/` files change.
+`bun run dev` restarts the Bun server when backend modules change and reloads connected browsers when backend or `public/` files change.
 
 Arch package helpers:
 
