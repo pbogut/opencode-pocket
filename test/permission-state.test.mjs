@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import test from "node:test"
+import { test } from "bun:test"
 import { permissionPresentation } from "../public/permission-state.js"
 
 test("explains current external directory permission requests", () => {

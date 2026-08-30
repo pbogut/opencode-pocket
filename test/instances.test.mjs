@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { EventEmitter, once } from "node:events"
-import test from "node:test"
+import { test } from "bun:test"
 import { activeSessionId, InstanceManager, instanceIdForUrl } from "../src/instances.mjs"
 
 class FakeBridge extends EventEmitter {

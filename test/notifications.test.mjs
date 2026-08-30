@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { mkdtemp, readFile, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import test from "node:test"
+import { test } from "bun:test"
 import { loadConfig } from "../src/config.mjs"
 import { Notifications } from "../src/notifications.mjs"
 

@@ -10,11 +10,11 @@
     "tui.js"
   ],
   "scripts": {
-    "test": "node --test tui.test.js",
-    "check": "node --check tui.js"
+    "test": "bun test tui.test.js",
+    "check": "bun ../../scripts/check.mjs '*.js'"
   },
   "engines": {
-    "node": ">=20",
+    "bun": ">=1.3",
     "opencode": ">=1.18.20"
   },
   "license": "MIT"

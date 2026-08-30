@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import test from "node:test"
+import { test } from "bun:test"
 import { conversationUsage, isStaleObservation, isSyntheticUserMessage, latestModels, reconcileSelection, supportsImages, visibleMessageParts } from "../public/model-state.js"
 
 test("latest models are tracked independently per mode", () => {

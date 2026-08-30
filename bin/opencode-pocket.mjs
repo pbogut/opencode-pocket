@@ -1,8 +1,7 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 import { existsSync } from "node:fs"
-import { loadEnvFile } from "node:process"
-import { resolveConfigProfile } from "../src/config-profile.mjs"
+import { loadConfigProfile, resolveConfigProfile } from "../src/config-profile.mjs"
 
 const args = process.argv.slice(2)
 
@@ -16,7 +15,9 @@ OPENCODE_POCKET_PROFILE provide equivalent environment overrides.`)
 }
 
 const config = resolveConfigProfile(args)
-if (existsSync(config.path)) loadEnvFile(config.path)
+if (existsSync(config.path)) {
+  await loadConfigProfile(config.path)
+}
 else if (config.required) throw new Error(`Configuration file not found: ${config.path}`)
 
 await import("../src/server.mjs")

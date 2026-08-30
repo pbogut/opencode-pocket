@@ -6,10 +6,18 @@ import http from "node:http"
 import net from "node:net"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import test from "node:test"
+import { afterEach, test } from "bun:test"
 import { fileURLToPath } from "node:url"
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
+const children = new Set()
+
+afterEach(() => {
+  for (const child of children) {
+    if (child.exitCode === null) child.kill("SIGKILL")
+  }
+  children.clear()
+})
 
 async function availablePort() {
   const server = net.createServer()
@@ -33,7 +41,7 @@ async function waitForServer(url, child) {
 }
 
 for (const shutdownSignal of ["SIGTERM", "SIGINT"]) {
-  test(`${shutdownSignal} closes an active SSE connection and exits promptly`, async (t) => {
+  test(`${shutdownSignal} closes an active SSE connection and exits promptly`, async () => {
     const port = await availablePort()
     const stateHome = await mkdtemp(join(tmpdir(), "opencode-pocket-shutdown-"))
     const url = `http://127.0.0.1:${port}`
@@ -49,13 +57,10 @@ for (const shutdownSignal of ["SIGTERM", "SIGINT"]) {
       },
       stdio: ["ignore", "pipe", "pipe"],
     })
+    children.add(child)
     let output = ""
     child.stdout.on("data", (chunk) => { output += chunk })
     child.stderr.on("data", (chunk) => { output += chunk })
-    t.after(() => {
-      if (child.exitCode === null) child.kill("SIGKILL")
-    })
-
     await waitForServer(url, child)
     const request = http.get(`${url}/api/events`)
     const [response] = await once(request, "response")
@@ -65,6 +70,7 @@ for (const shutdownSignal of ["SIGTERM", "SIGINT"]) {
     child.kill(shutdownSignal)
     const timeout = setTimeout(() => child.kill("SIGKILL"), 2_000)
     const [code, signal] = await once(child, "exit")
+    children.delete(child)
     clearTimeout(timeout)
     request.destroy()
 

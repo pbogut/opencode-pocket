@@ -1,5 +1,7 @@
+import { readFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
+import { parse } from "dotenv"
 
 function optionValue(args, name) {
   const equals = args.find((arg) => arg.startsWith(`${name}=`))
@@ -25,4 +27,11 @@ export function resolveConfigProfile(args = [], env = process.env, home = homedi
   if (profile && !/^[a-zA-Z0-9_-]+$/.test(profile)) throw new Error(`Invalid configuration profile: ${profile}`)
   const configHome = env.XDG_CONFIG_HOME || join(home, ".config")
   return { path: join(configHome, "opencode-pocket", profile ? `env.${profile}` : "env"), required: false }
+}
+
+export async function loadConfigProfile(path, env = process.env) {
+  const values = parse(await readFile(path))
+  for (const [name, value] of Object.entries(values)) {
+    if (env[name] === undefined) env[name] = value
+  }
 }

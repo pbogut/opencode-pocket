@@ -27,17 +27,17 @@ config:
 	@if [ ! -e "$(CONFIG_DIR)/env.dev" ]; then install -m 600 .env.dev.example "$(CONFIG_DIR)/env.dev"; printf 'Created %s\n' "$(CONFIG_DIR)/env.dev"; else printf 'Kept existing %s\n' "$(CONFIG_DIR)/env.dev"; fi
 
 start:
-	npm start
+	bun run start
 
 dev:
-	npm run dev
+	bun run dev
 
 test:
-	npm test
+	bun test
 
 check:
-	npm run check
-	npm --prefix packages/opencode-pocket-plugin run check
+	bun run check
+	bun run --cwd packages/opencode-pocket-plugin check
 
 verify: test check
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import test from "node:test"
+import { test } from "bun:test"
 import { normalizeAgentSort, sortAgentItems } from "../public/agent-sort.js"
 
 const agents = [

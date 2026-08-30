@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import test from "node:test"
+import { test } from "bun:test"
 
 test("service worker keeps background completions and clears foreground completions", async () => {
   const originalSelf = globalThis.self

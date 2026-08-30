@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import test from "node:test"
+import { test } from "bun:test"
 import { completionId, completionTag, isVisibleSession } from "../public/notification-state.js"
 
 test("builds the Web Push tag used by completion notifications", () => {

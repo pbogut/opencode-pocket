@@ -1,4 +1,4 @@
-import test from "node:test"
+import { afterEach, test } from "bun:test"
 import assert from "node:assert/strict"
 import http from "node:http"
 import { once } from "node:events"
@@ -21,7 +21,12 @@ async function readJson(req) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"))
 }
 
-test("bridge performs the terminal-free OpenCode control loop", async (t) => {
+const cleanups = []
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0).reverse()) cleanup()
+})
+
+test("bridge performs the terminal-free OpenCode control loop", async () => {
   const calls = []
   const sseClients = new Set()
   const projectDir = "/work/demo"
@@ -117,7 +122,7 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
 
   fake.listen(0, "127.0.0.1")
   await once(fake, "listening")
-  t.after(() => fake.close())
+  cleanups.push(() => fake.close())
   const address = fake.address()
 
   const bridge = new OpenCodeBridge({
@@ -126,7 +131,7 @@ test("bridge performs the terminal-free OpenCode control loop", async (t) => {
     openCodePassword: "",
     openCodeDirectory: projectDir,
   })
-  t.after(() => bridge.stop())
+  cleanups.push(() => bridge.stop())
   await bridge.start()
   await waitFor(() => bridge.connected)
 

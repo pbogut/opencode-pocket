@@ -1,6 +1,9 @@
 import assert from "node:assert/strict"
-import test from "node:test"
-import { resolveConfigProfile } from "../src/config-profile.mjs"
+import { mkdtemp, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { test } from "bun:test"
+import { loadConfigProfile, resolveConfigProfile } from "../src/config-profile.mjs"
 
 test("resolves default and named user configuration profiles", () => {
   assert.deepEqual(resolveConfigProfile([], {}, "/home/test"), {
@@ -27,4 +30,15 @@ test("rejects unsafe configuration profile names", () => {
   assert.throws(() => resolveConfigProfile(["--profile", "../secret"], {}, "/home/test"), /Invalid configuration profile/)
   assert.throws(() => resolveConfigProfile(["--profile"], {}, "/home/test"), /--profile requires a value/)
   assert.throws(() => resolveConfigProfile(["--config="], {}, "/home/test"), /--config requires a value/)
+})
+
+test("loads dotenv profiles without replacing existing environment values", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-pocket-profile-"))
+  const path = join(directory, "env")
+  await writeFile(path, "EXISTING=profile\nQUOTED='two words'\nMULTILINE=\"one\\ntwo\"\n")
+  const env = { EXISTING: "process" }
+
+  await loadConfigProfile(path, env)
+
+  assert.deepEqual(env, { EXISTING: "process", QUOTED: "two words", MULTILINE: "one\ntwo" })
 })
