@@ -10,6 +10,7 @@ import { loadPluginToken } from "./plugin-token.mjs"
 import { Notifications } from "./notifications.mjs"
 import { MAX_MESSAGE_BODY_BYTES, validateImageModelSupport, validateMessageInput } from "./message-input.mjs"
 import { publicAssets } from "./public-assets.mjs"
+import { SSEClient, sseEvent } from "./sse-client.mjs"
 
 const config = loadConfig()
 const pluginToken = await loadPluginToken(config)
@@ -54,7 +55,7 @@ async function bodyJson(req, maxBytes = 1_000_000) {
 }
 
 function broadcast(type, payload) {
-  const frame = `event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`
+  const frame = sseEvent(type, payload)
   for (const client of sseClients) client.write(frame)
 }
 
@@ -202,14 +203,16 @@ const server = http.createServer(async (req, res) => {
         Connection: "keep-alive",
         "X-Accel-Buffering": "no",
       })
-      res.write(`event: state\ndata: ${JSON.stringify(manager.snapshot())}\n\n`)
-      if (devMode) res.write(`event: dev-server\ndata: ${JSON.stringify({ id: devServerId })}\n\n`)
-      const timer = setInterval(() => res.write(": heartbeat\n\n"), 15_000)
-      sseClients.add(res)
-      req.on("close", () => {
+      let timer = null
+      const client = new SSEClient(res, () => {
         clearInterval(timer)
-        sseClients.delete(res)
+        sseClients.delete(client)
       })
+      req.on("close", () => client.detach())
+      sseClients.add(client)
+      const initialFrames = sseEvent("state", manager.snapshot()) + (devMode ? sseEvent("dev-server", { id: devServerId }) : "")
+      if (!client.write(initialFrames)) return
+      timer = setInterval(() => client.write(": heartbeat\n\n"), 15_000)
       return
     }
 

@@ -1,5 +1,6 @@
 import agentSort from "../public/agent-sort.js" with { type: "file" }
 import app from "../public/app.js" with { type: "file" }
+import eventStream from "../public/event-stream.js" with { type: "file" }
 import icon from "../public/icon.svg" with { type: "file" }
 import index from "../public/index.html" with { type: "file" }
 import manifest from "../public/manifest.webmanifest" with { type: "file" }
@@ -13,6 +14,7 @@ import styles from "../public/styles.css" with { type: "file" }
 export const publicAssets = new Map([
   ["agent-sort.js", agentSort],
   ["app.js", app],
+  ["event-stream.js", eventStream],
   ["icon.svg", icon],
   ["index.html", index],
   ["manifest.webmanifest", manifest],

@@ -1,5 +1,6 @@
 import { completionId, completionTag, isVisibleSession } from "./notification-state.js"
 import { normalizeAgentSort, sortAgentItems } from "./agent-sort.js"
+import { createEventStream, createLatestRequest } from "./event-stream.js"
 import { conversationUsage, isStaleObservation, latestModels, reconcileSelection, supportsImages, visibleMessageParts } from "./model-state.js"
 import { normalizeQuickMessages, quickMessageModeAvailable } from "./quick-message-state.js"
 import { permissionPresentation } from "./permission-state.js"
@@ -31,7 +32,7 @@ const state = {
   routeSessionId: initialRoute.sessionId,
   messages: [],
   loadingMessages: false,
-  loadingConversations: new Set(),
+  loadingConversations: new Map(),
   agents: [],
   agentSessionId: "",
   switchingAgentSession: "",
@@ -335,12 +336,13 @@ async function api(path, options = {}) {
       ...options,
       headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers || {}) },
     })
-  } catch {
+  } catch (error) {
+    if (error?.name === "AbortError" || options.signal?.aborted) throw error
     setServerOffline()
     throw new Error("Server is currently offline")
   }
   if ([502, 503, 504].includes(response.status)) {
-    setServerOffline()
+    if (!options.signal?.aborted) setServerOffline()
     throw new Error("Server is currently offline")
   }
   const text = await response.text()
@@ -389,31 +391,69 @@ function showToast(text) {
   showToast.timer = setTimeout(() => { state.toast = ""; render() }, 2600)
 }
 
+const snapshotRequests = createLatestRequest((signal, path, options = {}) => api(path, { ...options, signal }))
+
+async function loadSnapshot(path, options) {
+  const snapshot = await snapshotRequests.run(path, options)
+  return snapshot === undefined ? undefined : applySnapshot(snapshot)
+}
+
 async function loadState() {
   try {
-    return applySnapshot(await api("/api/state"))
-  } catch {
+    return await loadSnapshot("/api/state")
+  } catch (error) {
+    if (error?.name === "AbortError") return undefined
     setServerOffline()
-    return false
+    return undefined
   }
+}
+
+let conversationRequestGeneration = 0
+let conversationRequestController = new AbortController()
+
+function conversationRequest() {
+  return { generation: conversationRequestGeneration, signal: conversationRequestController.signal }
+}
+
+function currentConversationRequest(generation) {
+  return generation === conversationRequestGeneration
+}
+
+function resetConversationRequests() {
+  conversationRequestGeneration += 1
+  conversationRequestController.abort()
+  conversationRequestController = new AbortController()
+  state.loadingConversations.clear()
+  state.loadingMessages = false
+  state.loadingModelsSession = ""
+  state.loadingChangesSession = ""
+  state.diffs.clear()
+  state.diffErrors.clear()
+  state.loadingDiffs.clear()
+  state.messagesRefreshPending = false
+  clearTimeout(state.refreshTimer)
+  clearTimeout(state.changesTimer)
+  state.refreshTimer = null
+  state.changesTimer = null
 }
 
 async function loadMessages({ quiet = false } = {}) {
   const iid = state.routeInstanceId
   const sid = state.routeSessionId
+  const request = conversationRequest()
   if (!iid || !sid || state.loadingMessages) return
   state.loadingMessages = true
   if (!quiet) render()
   try {
-    const messages = await api(`${sessionApiPath(iid, sid, "messages")}?limit=120`)
-    if (routeMatches(iid, sid)) {
+    const messages = await api(`${sessionApiPath(iid, sid, "messages")}?limit=120`, { signal: request.signal })
+    if (currentConversationRequest(request.generation) && routeMatches(iid, sid)) {
       state.messages = messages
       reconcileMessageModels(iid, sid, messages)
     }
   } catch (error) {
-    if (routeMatches(iid, sid)) showToast(error.message)
+    if (error?.name !== "AbortError" && currentConversationRequest(request.generation) && routeMatches(iid, sid)) showToast(error.message)
   } finally {
-    if (routeMatches(iid, sid)) {
+    if (currentConversationRequest(request.generation) && routeMatches(iid, sid)) {
       state.loadingMessages = false
       render()
     }
@@ -455,10 +495,11 @@ async function loadAgents() {
   const iid = state.routeInstanceId
   const sid = state.routeSessionId
   const key = conversationKey(iid, sid)
+  const request = conversationRequest()
   if (!key) return
   try {
-    const agents = await api(sessionApiPath(iid, sid, "agents"))
-    if (!routeMatches(iid, sid)) return
+    const agents = await api(sessionApiPath(iid, sid, "agents"), { signal: request.signal })
+    if (!currentConversationRequest(request.generation) || !routeMatches(iid, sid)) return
     state.agents = Array.isArray(agents) ? agents : []
     state.agentSessionId = key
     const available = new Set(state.agents.map((agent) => agent.name))
@@ -469,7 +510,7 @@ async function loadAgents() {
     state.renderedAgents = ""
     render()
   } catch (error) {
-    if (routeMatches(iid, sid)) showToast(error.message)
+    if (error?.name !== "AbortError" && currentConversationRequest(request.generation) && routeMatches(iid, sid)) showToast(error.message)
   }
 }
 
@@ -477,18 +518,19 @@ async function loadModels() {
   const iid = state.routeInstanceId
   const sid = state.routeSessionId
   const key = conversationKey(iid, sid)
+  const request = conversationRequest()
   if (!key || state.loadingModelsSession === key) return
   state.loadingModelsSession = key
   try {
-    const models = await api(sessionApiPath(iid, sid, "models"))
-    if (!routeMatches(iid, sid)) return
+    const models = await api(sessionApiPath(iid, sid, "models"), { signal: request.signal })
+    if (!currentConversationRequest(request.generation) || !routeMatches(iid, sid)) return
     state.models = Array.isArray(models) ? models : []
     state.modelSessionId = key
     render()
   } catch (error) {
-    if (routeMatches(iid, sid)) showToast(error.message)
+    if (error?.name !== "AbortError" && currentConversationRequest(request.generation) && routeMatches(iid, sid)) showToast(error.message)
   } finally {
-    if (state.loadingModelsSession === key) state.loadingModelsSession = ""
+    if (currentConversationRequest(request.generation) && state.loadingModelsSession === key) state.loadingModelsSession = ""
   }
 }
 
@@ -496,20 +538,21 @@ async function loadChanges({ quiet = false } = {}) {
   const iid = state.routeInstanceId
   const sid = state.routeSessionId
   const key = conversationKey(iid, sid)
+  const request = conversationRequest()
   if (!key || state.loadingChangesSession === key) return
   state.loadingChangesSession = key
   if (!quiet) render()
   try {
-    const changes = await api(sessionApiPath(iid, sid, "changes"))
-    if (!routeMatches(iid, sid)) return
+    const changes = await api(sessionApiPath(iid, sid, "changes"), { signal: request.signal })
+    if (!currentConversationRequest(request.generation) || !routeMatches(iid, sid)) return
     state.changes = Array.isArray(changes) ? changes : []
     state.changesSessionId = key
     state.renderedChanges = ""
   } catch (error) {
-    if (routeMatches(iid, sid)) showToast(error.message)
+    if (error?.name !== "AbortError" && currentConversationRequest(request.generation) && routeMatches(iid, sid)) showToast(error.message)
   } finally {
-    if (state.loadingChangesSession === key) state.loadingChangesSession = ""
-    if (routeMatches(iid, sid)) render()
+    if (currentConversationRequest(request.generation) && state.loadingChangesSession === key) state.loadingChangesSession = ""
+    if (currentConversationRequest(request.generation) && routeMatches(iid, sid)) render()
   }
 }
 
@@ -517,31 +560,44 @@ async function loadDiff(messageId) {
   const iid = state.routeInstanceId
   const sid = state.routeSessionId
   const key = scopedKey(iid, sid, messageId)
+  const request = conversationRequest()
   if (!iid || !sid || !messageId || state.diffs.has(key) || state.loadingDiffs.has(key)) return
   state.loadingDiffs.add(key)
   state.diffErrors.delete(key)
   render()
   try {
-    const diff = await api(`${sessionApiPath(iid, sid, "diff")}?messageId=${encodeURIComponent(messageId)}`)
-    if (routeMatches(iid, sid)) state.diffs.set(key, Array.isArray(diff) ? diff : [])
+    const diff = await api(`${sessionApiPath(iid, sid, "diff")}?messageId=${encodeURIComponent(messageId)}`, { signal: request.signal })
+    if (currentConversationRequest(request.generation) && routeMatches(iid, sid)) state.diffs.set(key, Array.isArray(diff) ? diff : [])
   } catch (error) {
-    if (routeMatches(iid, sid)) state.diffErrors.set(key, error.message)
+    if (error?.name !== "AbortError" && currentConversationRequest(request.generation) && routeMatches(iid, sid)) state.diffErrors.set(key, error.message)
   } finally {
-    state.loadingDiffs.delete(key)
-    if (routeMatches(iid, sid)) render()
+    if (currentConversationRequest(request.generation)) state.loadingDiffs.delete(key)
+    if (currentConversationRequest(request.generation) && routeMatches(iid, sid)) render()
   }
 }
 
-async function loadConversation() {
+function loadExpandedDiffs() {
+  for (const details of app.querySelectorAll("details[open][data-diff-message]")) loadDiff(details.dataset.diffMessage)
+}
+
+function loadConversation() {
   const key = conversationKey()
-  if (!key || state.loadingConversations.has(key)) return
-  state.loadingConversations.add(key)
-  try {
-    await loadMessages()
-    await Promise.all([loadAgents(), loadModels(), loadChanges()])
-  } finally {
-    state.loadingConversations.delete(key)
-  }
+  const request = conversationRequest()
+  if (!key) return Promise.resolve()
+  const existing = state.loadingConversations.get(key)
+  if (existing) return existing
+  const loading = (async () => {
+    try {
+      await loadMessages()
+      if (!currentConversationRequest(request.generation) || conversationKey() !== key) return
+      await Promise.all([loadAgents(), loadModels(), loadChanges()])
+      if (currentConversationRequest(request.generation) && conversationKey() === key) loadExpandedDiffs()
+    } finally {
+      if (state.loadingConversations.get(key) === loading) state.loadingConversations.delete(key)
+    }
+  })()
+  state.loadingConversations.set(key, loading)
+  return loading
 }
 
 async function flushMessagesRefresh() {
@@ -2694,7 +2750,7 @@ app.addEventListener("click", async (event) => {
     void target.offsetWidth
     target.classList.add("refreshing")
     target.addEventListener("animationend", () => target.classList.remove("refreshing"), { once: true })
-    try { applySnapshot(await api("/api/refresh", { method: "POST" })) } catch (error) { showToast(error.message) }
+    try { await loadSnapshot("/api/refresh", { method: "POST" }) } catch (error) { showToast(error.message) }
     return
   }
   if (target.hasAttribute("data-retry-server")) {
@@ -2969,12 +3025,9 @@ window.addEventListener("hashchange", () => {
   document.body.classList.remove("changes-open", "sessions-open", "agent-drawer-open", "model-open", "quick-messages-open")
   state.modelPickerOpen = false
   state.quickMessagesOpen = false
-  clearTimeout(state.refreshTimer)
-  clearTimeout(state.changesTimer)
+  resetConversationRequests()
   clearTimeout(state.scrollToLatestTimer)
   state.scrollingToLatest = false
-  state.refreshTimer = null
-  state.messagesRefreshPending = false
   const wasConversation = Boolean(state.routeSessionId)
   const route = routeFromHash()
   state.routeInstanceId = route.instanceId
@@ -2985,15 +3038,12 @@ window.addEventListener("hashchange", () => {
     state.pendingTuiSelection = null
   }
   state.messages = []
-  state.loadingMessages = false
   state.agents = []
   state.agentSessionId = ""
   state.models = []
   state.modelSessionId = ""
-  state.loadingModelsSession = ""
   state.changes = []
   state.changesSessionId = ""
-  state.loadingChangesSession = ""
   state.changesOpen = false
   state.sessionsOpen = false
   state.conversationActionsOpen = false
@@ -3025,12 +3075,6 @@ function scheduleStateRecovery(delay = 0) {
   }, delay)
 }
 
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState !== "visible") return
-  acknowledgeVisibleCompletion()
-  scheduleStateRecovery()
-})
-
 window.addEventListener("scroll", () => {
   if (!state.routeSessionId) return
   if (state.scrollingToLatest) {
@@ -3045,41 +3089,74 @@ window.visualViewport?.addEventListener("resize", revealComposerAfterViewportRes
 window.addEventListener("resize", revealComposerAfterViewportResize)
 
 let devServerId = ""
-let sourceHasOpened = false
-const source = new EventSource("/api/events")
-source.addEventListener("open", () => {
-  if (sourceHasOpened) scheduleStateRecovery()
-  sourceHasOpened = true
+let resyncConversationAfterSnapshot = false
+const eventStream = createEventStream(() => new EventSource("/api/events"), {
+  open: () => {
+    clearTimeout(stateRecoveryTimer)
+    resyncConversationAfterSnapshot = true
+  },
+  error: () => scheduleStateRecovery(500),
+  "dev-server": (event) => {
+    const nextId = JSON.parse(event.data).id
+    if (devServerId && devServerId !== nextId) return location.reload()
+    devServerId = nextId
+  },
+  "dev-reload": () => location.reload(),
+  state: (event) => {
+    snapshotRequests.cancel()
+    if (resyncConversationAfterSnapshot) resetConversationRequests()
+    const navigated = applySnapshot(JSON.parse(event.data))
+    if (!resyncConversationAfterSnapshot) return
+    if (navigated || !state.routeSessionId) {
+      resyncConversationAfterSnapshot = false
+      return
+    }
+    if (!sessionFor(state.routeInstanceId, state.routeSessionId)) return
+    resyncConversationAfterSnapshot = false
+    loadConversation()
+  },
+  "agent-event": (message) => {
+    const event = JSON.parse(message.data)
+    if ((event.type === "question.replied" || event.type === "question.rejected") && event.requestId) {
+      state.questionAnswers.delete(scopedKey(event.instanceId, event.requestId))
+      persistDrafts()
+    }
+    const switchedAgent = event.type === "session.next.agent.switched" ? event.data?.agent : event.message?.info?.agent
+    if (event.instanceId && event.sessionId && switchedAgent) {
+      state.selectedAgents.set(conversationKey(event.instanceId, event.sessionId), switchedAgent)
+      if (routeMatches(event.instanceId, event.sessionId)) render()
+    }
+    if (event.type === "session.completed") acknowledgeVisibleCompletion(event.instanceId, event.sessionId, event.completedAt)
+    if (event.type === "message.part" && event.part?.type === "patch" && routeMatches(event.instanceId, event.sessionId)) scheduleChangesRefresh()
+    if (state.routeSessionId && routeMatches(event.instanceId, event.sessionId) && ["message.part", "message.updated", "session.status"].includes(event.type)) scheduleMessagesRefresh()
+  },
 })
-source.addEventListener("error", () => scheduleStateRecovery(500))
-source.addEventListener("dev-server", (event) => {
-  const nextId = JSON.parse(event.data).id
-  if (devServerId && devServerId !== nextId) return location.reload()
-  devServerId = nextId
+
+function suspendEventStream() {
+  eventStream.disconnect()
+  clearTimeout(stateRecoveryTimer)
+  snapshotRequests.cancel()
+  resetConversationRequests()
+  resyncConversationAfterSnapshot = true
+}
+
+function resumeEventStream() {
+  if (document.visibilityState !== "visible" || !eventStream.connect()) return
+  acknowledgeVisibleCompletion()
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") resumeEventStream()
+  else suspendEventStream()
 })
-source.addEventListener("dev-reload", () => location.reload())
-source.addEventListener("state", (event) => {
-  applySnapshot(JSON.parse(event.data))
-})
-source.addEventListener("agent-event", (message) => {
-  const event = JSON.parse(message.data)
-  if ((event.type === "question.replied" || event.type === "question.rejected") && event.requestId) {
-    state.questionAnswers.delete(scopedKey(event.instanceId, event.requestId))
-    persistDrafts()
-  }
-  const switchedAgent = event.type === "session.next.agent.switched" ? event.data?.agent : event.message?.info?.agent
-  if (event.instanceId && event.sessionId && switchedAgent) {
-    state.selectedAgents.set(conversationKey(event.instanceId, event.sessionId), switchedAgent)
-    if (routeMatches(event.instanceId, event.sessionId)) render()
-  }
-  if (event.type === "session.completed") acknowledgeVisibleCompletion(event.instanceId, event.sessionId, event.completedAt)
-  if (event.type === "message.part" && event.part?.type === "patch" && routeMatches(event.instanceId, event.sessionId)) scheduleChangesRefresh()
-  if (state.routeSessionId && routeMatches(event.instanceId, event.sessionId) && ["message.part", "message.updated", "session.status"].includes(event.type)) scheduleMessagesRefresh()
-})
+window.addEventListener("pagehide", suspendEventStream)
+window.addEventListener("pageshow", resumeEventStream)
+
+if (document.visibilityState === "visible") eventStream.connect()
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {})
 loadState().then((navigated) => {
-  if (!navigated && state.routeSessionId && sessionFor(state.routeInstanceId, state.routeSessionId)) loadConversation()
+  if (navigated !== undefined && !navigated && document.visibilityState === "visible" && state.routeSessionId && sessionFor(state.routeInstanceId, state.routeSessionId)) loadConversation()
   acknowledgeVisibleCompletion()
 })
 render()
